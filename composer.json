@@ -1,0 +1,34 @@
+{
+  "name": "saucebase/module-installer",
+  "description": "Custom Composer installer for Sauce Base modules (type: saucebase-module). Installs to Modules/<Name> with configurable base dir.",
+  "type": "composer-plugin",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Sauce Base",
+      "email": "hello@saucebase.dev"
+    }
+  ],
+  "require": {
+    "php": "^8.4",
+    "composer-plugin-api": "^2.0"
+  },
+  "require-dev": {
+    "composer/composer": "^2.0",
+    "phpunit/phpunit": "^12.3"
+  },
+  "autoload": {
+    "psr-4": {
+      "Saucebase\\ModuleInstaller\\": "src/",
+      "Tests\\": "tests/"
+    }
+  },
+  "extra": {
+    "class": "Saucebase\\ModuleInstaller\\Plugin"
+  },
+  "scripts": {
+    "test": "phpunit"
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
