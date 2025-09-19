@@ -1,0 +1,15 @@
+{
+  "name": "module-installer",
+  "version": "1.0.0",
+  "description": "Development tooling for Sauce Base module installer.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "commitlint": "commitlint --config commitlint.config.js"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1"
+  }
+}
