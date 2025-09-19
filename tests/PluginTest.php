@@ -27,7 +27,7 @@ final class PluginTest extends TestCase
             ->method('addInstaller')
             ->with($this->isInstanceOf(Installer::class));
 
-        $plugin = new Plugin();
+        $plugin = new Plugin;
         $plugin->activate($composer, $io);
     }
 
@@ -42,7 +42,7 @@ final class PluginTest extends TestCase
             ->method('removeInstaller')
             ->with($this->isInstanceOf(Installer::class));
 
-        $plugin = new Plugin();
+        $plugin = new Plugin;
         $plugin->deactivate($composer, $io);
     }
 
@@ -57,16 +57,16 @@ final class PluginTest extends TestCase
             ->method('removeInstaller')
             ->with($this->isInstanceOf(Installer::class));
 
-        $plugin = new Plugin();
+        $plugin = new Plugin;
         $plugin->uninstall($composer, $io);
     }
 
     /**
-     * @param InstallationManager&MockObject $installationManager
+     * @param  InstallationManager&MockObject  $installationManager
      */
     private function buildComposer(InstallationManager $installationManager): Composer
     {
-        $composer = new Composer();
+        $composer = new Composer;
 
         $config = new Config(false, getcwd());
         $composer->setConfig($config);
