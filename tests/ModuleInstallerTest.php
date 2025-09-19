@@ -66,13 +66,13 @@ final class ModuleInstallerTest extends TestCase
 
     public function test_get_install_path_uses_default_modules_dir_when_no_composer(): void
     {
-        // Composer is null -> should fall back to DEFAULT_ROOT ("modules")
+        // Composer is null -> should fall back to DEFAULT_ROOT ("Modules")
         $io = $this->createMock(IOInterface::class);
         $installer = new TestableInstaller($io, null);
 
         $pkg = new Package('saucebase/something-nice', '1.0.0.0', '1.0.0');
 
-        $this->assertSame('modules/SomethingNice', $installer->getInstallPath($pkg));
+        $this->assertSame('Modules/SomethingNice', $installer->getInstallPath($pkg));
     }
 
     public function test_get_install_path_uses_default_when_no_module_dir_in_extra(): void
@@ -88,7 +88,7 @@ final class ModuleInstallerTest extends TestCase
         $installer = new TestableInstaller($io, $composer);
         $pkg = new Package('vendor/awesome-toolkit', '1.0.0.0', '1.0.0');
 
-        $this->assertSame('modules/AwesomeToolkit', $installer->getInstallPath($pkg));
+        $this->assertSame('Modules/AwesomeToolkit', $installer->getInstallPath($pkg));
     }
 
     public function test_get_install_path_honors_extra_module_dir(): void
@@ -97,13 +97,13 @@ final class ModuleInstallerTest extends TestCase
         $composer = $this->createMock(Composer::class);
 
         $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
-        $root->setExtra(['module-dir' => 'Modules']); // custom dir
+        $root->setExtra(['module-dir' => 'CustomModules']); // custom dir
         $composer->method('getPackage')->willReturn($root);
 
         $installer = new TestableInstaller($io, $composer);
         $pkg = new Package('vendor/awesome-toolkit', '1.0.0.0', '1.0.0');
 
-        $this->assertSame('Modules/AwesomeToolkit', $installer->getInstallPath($pkg));
+        $this->assertSame('CustomModules/AwesomeToolkit', $installer->getInstallPath($pkg));
     }
 
     public function test_get_module_name_throws_on_invalid_pretty_name(): void

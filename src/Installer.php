@@ -8,7 +8,7 @@ use Saucebase\ModuleInstaller\Exceptions\ModuleInstallerException;
 
 class Installer extends LibraryInstaller
 {
-    const DEFAULT_ROOT = 'modules';
+    const DEFAULT_ROOT = 'Modules';
 
     const DEFAULT_MODULE_TYPE = 'laravel-module';
 
