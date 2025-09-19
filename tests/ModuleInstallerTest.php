@@ -37,16 +37,31 @@ final class TestableInstaller extends Installer
 
 final class ModuleInstallerTest extends TestCase
 {
-    public function test_supports_only_saucebase_type(): void
+    public function test_supports_default_module_type(): void
     {
         $io = $this->createMock(IOInterface::class);
         $composer = $this->createMock(Composer::class);
 
         $installer = new TestableInstaller($io, $composer);
 
-        $this->assertTrue($installer->supports('saucebase-module'));
+        $this->assertTrue($installer->supports('laravel-module'));
         $this->assertFalse($installer->supports('library'));
         $this->assertFalse($installer->supports('composer-plugin'));
+    }
+
+    public function test_supports_custom_module_type_from_extra(): void
+    {
+        $io = $this->createMock(IOInterface::class);
+        $composer = $this->createMock(Composer::class);
+
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-type' => 'saucebase-module']);
+        $composer->method('getPackage')->willReturn($root);
+
+        $installer = new TestableInstaller($io, $composer);
+
+        $this->assertTrue($installer->supports('saucebase-module'));
+        $this->assertFalse($installer->supports('laravel-module'));
     }
 
     public function test_get_install_path_uses_default_modules_dir_when_no_composer(): void

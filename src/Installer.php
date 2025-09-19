@@ -10,7 +10,7 @@ class Installer extends LibraryInstaller
 {
     const DEFAULT_ROOT = 'modules';
 
-    const SAUCEBASE_TYPE = 'saucebase-module';
+    const DEFAULT_MODULE_TYPE = 'laravel-module';
 
     public function getInstallPath(PackageInterface $package)
     {
@@ -65,6 +65,21 @@ class Installer extends LibraryInstaller
 
     public function supports($packageType)
     {
-        return $packageType === self::SAUCEBASE_TYPE;
+        return $packageType === $this->getSupportedModuleType();
+    }
+
+    protected function getSupportedModuleType()
+    {
+        if (! $this->composer || ! $this->composer->getPackage()) {
+            return self::DEFAULT_MODULE_TYPE;
+        }
+
+        $extra = $this->composer->getPackage()->getExtra();
+
+        if (! $extra || empty($extra['module-type'])) {
+            return self::DEFAULT_MODULE_TYPE;
+        }
+
+        return $extra['module-type'];
     }
 }

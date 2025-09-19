@@ -5,11 +5,11 @@
 [![Tests](https://github.com/sauce-base/module-installer/actions/workflows/php.yml/badge.svg)](https://github.com/sauce-base/module-installer/actions/workflows/php.yml)
 [![License](https://img.shields.io/badge/License-MIT-0A7EA4)](#license)
 
-Composer plugin that powers module installation inside [Sauce Base](https://github.com/sauce-base/core) projects. The plugin ships with `sauce-base/core`, ensuring every `saucebase-module` package lands in the correct modules directory for auto-discovery and bootstrap.
+Composer plugin that powers module installation inside [Sauce Base](https://github.com/sauce-base/core) projects. The plugin ships with `sauce-base/core`, ensuring every configured module package lands in the correct modules directory for auto-discovery and bootstrap. It remains fully compatible with [nWidart/laravel-modules](https://github.com/nWidart/laravel-modules) and serves as a Sauce Base-focused alternative to [joshbrw/laravel-module-installer](https://github.com/joshbrw/laravel-module-installer).
 
 ## What it Does
 
-- Registers a Composer installer for the `saucebase-module` package type.
+- Registers a Composer installer for the configured module package type (defaults to `laravel-module`).
 - Installs every module into the configured Sauce Base modules directory (`modules/` by default).
 - Converts package names (for example `saucebase/example-module`) into StudlyCase directory names (`ExampleModule`).
 - Supports overriding the installation root with the root package's `extra.module-dir` setting.
@@ -30,6 +30,20 @@ Need the installer for a different Composer project? Require it explicitly:
 composer require saucebase/module-installer
 ```
 
+## Configuring the Module Type
+
+By default the installer registers the `laravel-module` package type. If your application needs a different module type, declare it on the root package's `extra` section:
+
+```json
+{
+    "extra": {
+        "module-type": "saucebase-module"
+    }
+}
+```
+
+Any modules you install must set their `composer.json` `type` to match this value.
+
 ## Configuring the Install Location
 
 By default, modules are installed under `modules/` at the project root. You can change this by adding a `module-dir` key to your application's `extra` section:
@@ -48,7 +62,7 @@ With the configuration above, a module published as `saucebase/example-module` w
 
 To ship a module that works with this installer:
 
-1. Set the package type to `saucebase-module` in the module's `composer.json`.
+1. Set the package type in the module's `composer.json` to whatever your application configured (defaults to `laravel-module`).
 2. Follow the Sauce Base module folder conventions (your module code will live inside the directory created by the installer).
 3. Advise consumers to install the module via Composer:
 
