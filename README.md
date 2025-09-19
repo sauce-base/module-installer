@@ -1,5 +1,10 @@
 # Saucebase Module Installer
 
+[![PHP Version](https://img.shields.io/badge/PHP-8.4%2B-777BB4?logo=php&logoColor=white)](#requirements)
+[![Composer](https://img.shields.io/badge/Composer-2.x-885630?logo=composer&logoColor=white)](#requirements)
+[![Tests](https://img.shields.io/badge/Tests-PHPUnit%2012-passing-brightgreen?logo=phpunit&logoColor=white)](#local-development)
+[![License](https://img.shields.io/badge/License-MIT-0A7EA4)](#license)
+
 Composer plugin that powers module installation inside [Sauce Base](https://github.com/sauce-base/core) projects. The plugin ships with `sauce-base/core`, ensuring every `saucebase-module` package lands in the correct modules directory for auto-discovery and bootstrap.
 
 ## What it Does
