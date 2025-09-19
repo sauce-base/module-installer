@@ -2,18 +2,19 @@
 
 namespace Saucebase\ModuleInstaller;
 
-use Composer\Package\PackageInterface;
 use Composer\Installer\LibraryInstaller;
+use Composer\Package\PackageInterface;
 use Saucebase\ModuleInstaller\Exceptions\ModuleInstallerException;
 
 class Installer extends LibraryInstaller
 {
-    const DEFAULT_ROOT = "modules";
-    const SAUCEBASE_TYPE = "saucebase-module";
+    const DEFAULT_ROOT = 'modules';
+
+    const SAUCEBASE_TYPE = 'saucebase-module';
 
     public function getInstallPath(PackageInterface $package)
     {
-        return $this->getBaseInstallationPath() . '/' . $this->getModuleName($package);
+        return $this->getBaseInstallationPath().'/'.$this->getModuleName($package);
     }
 
     /**
@@ -24,13 +25,13 @@ class Installer extends LibraryInstaller
      */
     protected function getBaseInstallationPath()
     {
-        if (!$this->composer || !$this->composer->getPackage()) {
+        if (! $this->composer || ! $this->composer->getPackage()) {
             return self::DEFAULT_ROOT;
         }
 
         $extra = $this->composer->getPackage()->getExtra();
 
-        if (!$extra || empty($extra['module-dir'])) {
+        if (! $extra || empty($extra['module-dir'])) {
             return self::DEFAULT_ROOT;
         }
 
@@ -40,8 +41,7 @@ class Installer extends LibraryInstaller
     /**
      * Get the module name, i.e. "saucebase/something-nice" will be transformed into "SomethingNice"
      *
-     * @param PackageInterface $package Compose Package Interface
-     *
+     * @param  PackageInterface  $package  Compose Package Interface
      * @return string Module Name
      *
      * @throws ModuleInstallerException
@@ -50,21 +50,21 @@ class Installer extends LibraryInstaller
     {
         $name = $package->getPrettyName(); // e.g. "saucebase/something-nice"
 
-        if (strpos($name, "/") === false) {
+        if (strpos($name, '/') === false) {
             throw new ModuleInstallerException("Invalid package name: $name");
         }
 
         // Take only the part after the vendor (index 1)
-        [$vendor, $packageName] = explode("/", $name, 2);
+        [$vendor, $packageName] = explode('/', $name, 2);
 
         // Split by "-" and convert each segment to ucfirst
-        $parts = explode("-", $packageName);
+        $parts = explode('-', $packageName);
 
         return implode('', array_map('ucfirst', $parts));
     }
 
     public function supports($packageType)
     {
-        return self::SAUCEBASE_TYPE === $packageType;
+        return $packageType === self::SAUCEBASE_TYPE;
     }
 }
