@@ -20,7 +20,6 @@ final class TestableInstaller extends Installer
 {
     public function __construct(?IOInterface $io = null, ?Composer $composer = null)
     {
-        // don't call parent::__construct(...)
         $this->io = $io;
         $this->composer = $composer;
     }
