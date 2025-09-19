@@ -51,7 +51,7 @@ By default, modules are installed under `modules/` at the project root. You can 
 ```json
 {
     "extra": {
-        "module-dir": "Modules"
+        "module-dir": "MyModules"
     }
 }
 ```
