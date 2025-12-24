@@ -14,7 +14,7 @@ class Installer extends LibraryInstaller
 
     public function getInstallPath(PackageInterface $package)
     {
-        return $this->getBaseInstallationPath() . '/' . $this->getModuleName($package);
+        return $this->getBaseInstallationPath().'/'.$this->getModuleName($package);
     }
 
     /**
