@@ -110,7 +110,6 @@ class Installer extends LibraryInstaller
     /**
      * Remove excluded directories after package installation.
      *
-     * @param  PackageInterface  $package
      * @return void
      */
     protected function removeExcludedDirectories(PackageInterface $package)
@@ -125,7 +124,7 @@ class Installer extends LibraryInstaller
         $filesystem = new Filesystem;
 
         foreach ($excludedDirs as $dir) {
-            $dirPath = $installPath . '/' . $dir;
+            $dirPath = $installPath.'/'.$dir;
             if (is_dir($dirPath)) {
                 $filesystem->removeDirectory($dirPath);
                 $this->io->write("  - Excluded directory: <info>$dir</info>");
