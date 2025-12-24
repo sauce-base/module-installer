@@ -17,7 +17,7 @@ class Installer extends LibraryInstaller
 
     public function getInstallPath(PackageInterface $package)
     {
-        return $this->getBaseInstallationPath() . '/' . $this->getModuleName($package);
+        return $this->getBaseInstallationPath().'/'.$this->getModuleName($package);
     }
 
     /**
@@ -110,7 +110,6 @@ class Installer extends LibraryInstaller
     /**
      * Override installCode to filter out excluded directories.
      *
-     * @param  PackageInterface  $package
      * @return void
      */
     protected function installCode(PackageInterface $package)
@@ -124,10 +123,10 @@ class Installer extends LibraryInstaller
             return;
         }
 
-        $filesystem = new Filesystem();
+        $filesystem = new Filesystem;
 
         foreach ($excludedDirs as $dir) {
-            $dirPath = $installPath . '/' . $dir;
+            $dirPath = $installPath.'/'.$dir;
             if (is_dir($dirPath)) {
                 $filesystem->removeDirectory($dirPath);
                 $this->io->write("  - Excluded directory: <info>$dir</info>");
