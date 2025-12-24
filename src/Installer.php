@@ -4,6 +4,7 @@ namespace Saucebase\ModuleInstaller;
 
 use Composer\Installer\LibraryInstaller;
 use Composer\Package\PackageInterface;
+use Composer\Util\Filesystem;
 use Saucebase\ModuleInstaller\Exceptions\ModuleInstallerException;
 
 class Installer extends LibraryInstaller
@@ -11,6 +12,8 @@ class Installer extends LibraryInstaller
     const DEFAULT_ROOT = 'Modules';
 
     const DEFAULT_MODULE_TYPE = 'laravel-module';
+
+    const DEFAULT_EXCLUDED_DIRS = ['.github', '.git'];
 
     public function getInstallPath(PackageInterface $package)
     {
@@ -81,5 +84,80 @@ class Installer extends LibraryInstaller
         }
 
         return $extra['module-type'];
+    }
+
+    /**
+     * Get the list of directories to exclude during installation.
+     * Can be configured via the 'module-exclude-dirs' key in composer.json extra.
+     *
+     * @return array
+     */
+    protected function getExcludedDirectories()
+    {
+        if (! $this->composer || ! $this->composer->getPackage()) {
+            return self::DEFAULT_EXCLUDED_DIRS;
+        }
+
+        $extra = $this->composer->getPackage()->getExtra();
+
+        if (! $extra || empty($extra['module-exclude-dirs'])) {
+            return self::DEFAULT_EXCLUDED_DIRS;
+        }
+
+        return $extra['module-exclude-dirs'];
+    }
+
+    /**
+     * Remove excluded directories after package installation.
+     *
+     * @param  PackageInterface  $package
+     * @return void
+     */
+    protected function removeExcludedDirectories(PackageInterface $package)
+    {
+        $installPath = $this->getInstallPath($package);
+        $excludedDirs = $this->getExcludedDirectories();
+
+        if (empty($excludedDirs)) {
+            return;
+        }
+
+        $filesystem = new Filesystem;
+
+        foreach ($excludedDirs as $dir) {
+            $dirPath = $installPath . '/' . $dir;
+            if (is_dir($dirPath)) {
+                $filesystem->removeDirectory($dirPath);
+                $this->io->write("  - Excluded directory: <info>$dir</info>");
+            }
+        }
+    }
+
+    /**
+     * Override install to remove excluded directories after installation.
+     *
+     * {@inheritDoc}
+     */
+    public function install(\Composer\Repository\InstalledRepositoryInterface $repo, PackageInterface $package)
+    {
+        $promise = parent::install($repo, $package);
+
+        return $promise->then(function () use ($package) {
+            $this->removeExcludedDirectories($package);
+        });
+    }
+
+    /**
+     * Override update to remove excluded directories after update.
+     *
+     * {@inheritDoc}
+     */
+    public function update(\Composer\Repository\InstalledRepositoryInterface $repo, PackageInterface $initial, PackageInterface $target)
+    {
+        $promise = parent::update($repo, $initial, $target);
+
+        return $promise->then(function () use ($target) {
+            $this->removeExcludedDirectories($target);
+        });
     }
 }
