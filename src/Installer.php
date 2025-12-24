@@ -123,10 +123,10 @@ class Installer extends LibraryInstaller
             return;
         }
 
-        $filesystem = new Filesystem();
+        $filesystem = new Filesystem;
 
         foreach ($excludedDirs as $dir) {
-            $dirPath = $installPath . '/' . $dir;
+            $dirPath = $installPath.'/'.$dir;
             if (is_dir($dirPath)) {
                 $filesystem->removeDirectory($dirPath);
                 $this->io->write("  - Excluded directory: <info>$dir</info>");
