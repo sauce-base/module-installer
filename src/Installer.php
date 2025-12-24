@@ -110,7 +110,6 @@ class Installer extends LibraryInstaller
     /**
      * Override installCode to filter out excluded directories.
      *
-     * @param  PackageInterface  $package
      * @return void
      */
     protected function installCode(PackageInterface $package)
