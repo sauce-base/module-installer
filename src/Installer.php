@@ -4,6 +4,7 @@ namespace Saucebase\ModuleInstaller;
 
 use Composer\Installer\LibraryInstaller;
 use Composer\Package\PackageInterface;
+use Composer\Util\Filesystem;
 use Saucebase\ModuleInstaller\Exceptions\ModuleInstallerException;
 
 class Installer extends LibraryInstaller
@@ -12,9 +13,11 @@ class Installer extends LibraryInstaller
 
     const DEFAULT_MODULE_TYPE = 'laravel-module';
 
+    const DEFAULT_EXCLUDED_DIRS = ['.github', '.git'];
+
     public function getInstallPath(PackageInterface $package)
     {
-        return $this->getBaseInstallationPath().'/'.$this->getModuleName($package);
+        return $this->getBaseInstallationPath() . '/' . $this->getModuleName($package);
     }
 
     /**
@@ -81,5 +84,54 @@ class Installer extends LibraryInstaller
         }
 
         return $extra['module-type'];
+    }
+
+    /**
+     * Get the list of directories to exclude during installation.
+     * Can be configured via the 'module-exclude-dirs' key in composer.json extra.
+     *
+     * @return array
+     */
+    protected function getExcludedDirectories()
+    {
+        if (! $this->composer || ! $this->composer->getPackage()) {
+            return self::DEFAULT_EXCLUDED_DIRS;
+        }
+
+        $extra = $this->composer->getPackage()->getExtra();
+
+        if (! $extra || empty($extra['module-exclude-dirs'])) {
+            return self::DEFAULT_EXCLUDED_DIRS;
+        }
+
+        return $extra['module-exclude-dirs'];
+    }
+
+    /**
+     * Override installCode to filter out excluded directories.
+     *
+     * @param  PackageInterface  $package
+     * @return void
+     */
+    protected function installCode(PackageInterface $package)
+    {
+        parent::installCode($package);
+
+        $installPath = $this->getInstallPath($package);
+        $excludedDirs = $this->getExcludedDirectories();
+
+        if (empty($excludedDirs)) {
+            return;
+        }
+
+        $filesystem = new Filesystem();
+
+        foreach ($excludedDirs as $dir) {
+            $dirPath = $installPath . '/' . $dir;
+            if (is_dir($dirPath)) {
+                $filesystem->removeDirectory($dirPath);
+                $this->io->write("  - Excluded directory: <info>$dir</info>");
+            }
+        }
     }
 }
