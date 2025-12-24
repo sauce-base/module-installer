@@ -17,7 +17,7 @@ class Installer extends LibraryInstaller
 
     public function getInstallPath(PackageInterface $package)
     {
-        return $this->getBaseInstallationPath() . '/' . $this->getModuleName($package);
+        return $this->getBaseInstallationPath().'/'.$this->getModuleName($package);
     }
 
     /**
@@ -115,8 +115,6 @@ class Installer extends LibraryInstaller
     protected function installCode(PackageInterface $package)
     {
         parent::installCode($package);
-
-        return;
 
         // $installPath = $this->getInstallPath($package);
         // $excludedDirs = $this->getExcludedDirectories();
