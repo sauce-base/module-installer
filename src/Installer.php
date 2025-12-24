@@ -117,21 +117,23 @@ class Installer extends LibraryInstaller
     {
         parent::installCode($package);
 
-        $installPath = $this->getInstallPath($package);
-        $excludedDirs = $this->getExcludedDirectories();
+        return;
 
-        if (empty($excludedDirs)) {
-            return;
-        }
+        // $installPath = $this->getInstallPath($package);
+        // $excludedDirs = $this->getExcludedDirectories();
 
-        $filesystem = new Filesystem();
+        // if (empty($excludedDirs)) {
+        //     return;
+        // }
 
-        foreach ($excludedDirs as $dir) {
-            $dirPath = $installPath . '/' . $dir;
-            if (is_dir($dirPath)) {
-                $filesystem->removeDirectory($dirPath);
-                $this->io->write("  - Excluded directory: <info>$dir</info>");
-            }
-        }
+        // $filesystem = new Filesystem();
+
+        // foreach ($excludedDirs as $dir) {
+        //     $dirPath = $installPath . '/' . $dir;
+        //     if (is_dir($dirPath)) {
+        //         $filesystem->removeDirectory($dirPath);
+        //         $this->io->write("  - Excluded directory: <info>$dir</info>");
+        //     }
+        // }
     }
 }
