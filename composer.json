@@ -1,6 +1,6 @@
 {
   "name": "saucebase/module-installer",
-  "description": "Custom Composer installer for Sauce Base modules (type: saucebase-module). Installs to Modules/<Name> with configurable base dir.",
+  "description": "Custom Composer installer for Sauce Base modules (type: saucebase-module). Installs to modules/<name> (lowercase) with configurable base dir.",
   "type": "composer-plugin",
   "license": "MIT",
   "authors": [
@@ -12,8 +12,8 @@
   "require": {
     "php": "^8.4",
     "composer-plugin-api": "^2.0",
-    "symfony/finder": "^8.0",
-    "symfony/process": "^8.0"
+    "symfony/finder": "^7.0|^8.0",
+    "symfony/process": "^7.0|^8.0"
   },
   "require-dev": {
     "composer/composer": "^2.0",
