@@ -91,13 +91,13 @@ final class ModuleInstallerTest extends TestCase
 
     public function test_get_install_path_uses_default_modules_dir_when_no_composer(): void
     {
-        // Composer is null -> should fall back to DEFAULT_ROOT ("Modules")
+        // Composer is null -> should fall back to DEFAULT_ROOT ("modules")
         $io = $this->createStub(IOInterface::class);
         $installer = new TestableInstaller($io, null);
 
         $pkg = new Package('saucebase/something-nice', '1.0.0.0', '1.0.0');
 
-        $this->assertSame('Modules/SomethingNice', $installer->getInstallPath($pkg));
+        $this->assertSame('modules/something-nice', $installer->getInstallPath($pkg));
     }
 
     public function test_get_install_path_uses_default_when_no_module_dir_in_extra(): void
@@ -113,7 +113,7 @@ final class ModuleInstallerTest extends TestCase
         $installer = new TestableInstaller($io, $composer);
         $pkg = new Package('vendor/awesome-toolkit', '1.0.0.0', '1.0.0');
 
-        $this->assertSame('Modules/AwesomeToolkit', $installer->getInstallPath($pkg));
+        $this->assertSame('modules/awesome-toolkit', $installer->getInstallPath($pkg));
     }
 
     public function test_get_install_path_honors_extra_module_dir(): void
@@ -128,7 +128,27 @@ final class ModuleInstallerTest extends TestCase
         $installer = new TestableInstaller($io, $composer);
         $pkg = new Package('vendor/awesome-toolkit', '1.0.0.0', '1.0.0');
 
-        $this->assertSame('CustomModules/AwesomeToolkit', $installer->getInstallPath($pkg));
+        $this->assertSame('CustomModules/awesome-toolkit', $installer->getInstallPath($pkg));
+    }
+
+    public function test_get_module_name_returns_lowercase_slug(): void
+    {
+        $io = $this->createStub(IOInterface::class);
+        $installer = new TestableInstaller($io, null);
+
+        $cases = [
+            'saucebase/auth' => 'auth',
+            'saucebase/billing' => 'billing',
+            'saucebase/my-module' => 'my-module',
+            'saucebase/some-CAPS' => 'some-caps',
+            'vendor/awesome-toolkit' => 'awesome-toolkit',
+        ];
+
+        foreach ($cases as $packageName => $expected) {
+            $pkg = $this->createStub(PackageInterface::class);
+            $pkg->method('getPrettyName')->willReturn($packageName);
+            $this->assertSame($expected, $installer->callGetModuleName($pkg), "Failed for: $packageName");
+        }
     }
 
     public function test_get_module_name_throws_on_invalid_pretty_name(): void
