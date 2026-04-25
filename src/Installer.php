@@ -20,7 +20,7 @@ use Symfony\Component\Process\Process;
  */
 class Installer extends LibraryInstaller
 {
-    const DEFAULT_ROOT = 'Modules';
+    const DEFAULT_ROOT = 'modules';
 
     const DEFAULT_MODULE_TYPE = 'laravel-module';
 
@@ -59,10 +59,11 @@ class Installer extends LibraryInstaller
     }
 
     /**
-     * Get the module name, i.e. "saucebase/something-nice" will be transformed into "SomethingNice"
+     * Get the module directory name from the package name.
+     * "saucebase/something-nice" → "something-nice" (lowercase slug, hyphens preserved).
      *
-     * @param  PackageInterface  $package  Compose Package Interface
-     * @return string Module Name
+     * @param  PackageInterface  $package  Composer Package Interface
+     * @return string Module directory name
      *
      * @throws ModuleInstallerException
      */
@@ -74,13 +75,10 @@ class Installer extends LibraryInstaller
             throw new ModuleInstallerException("Invalid package name: $name");
         }
 
-        // Take only the part after the vendor (index 1)
-        [$vendor, $packageName] = explode('/', $name, 2);
+        // Take only the part after the vendor (index 1) and lowercase it
+        [, $packageName] = explode('/', $name, 2);
 
-        // Split by "-" and convert each segment to ucfirst
-        $parts = explode('-', $packageName);
-
-        return implode('', array_map('ucfirst', $parts));
+        return strtolower($packageName);
     }
 
     public function supports($packageType)
