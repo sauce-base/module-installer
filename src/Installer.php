@@ -28,6 +28,8 @@ class Installer extends LibraryInstaller
 
     const DEFAULT_UPDATE_STRATEGY = 'merge';
 
+    protected bool $skipUpdateCode = false;
+
     const UPDATE_STRATEGY_MERGE = 'merge';
 
     const UPDATE_STRATEGY_OVERWRITE = 'overwrite';
@@ -274,12 +276,29 @@ class Installer extends LibraryInstaller
     }
 
     /**
+     * Returns true when the package is served by a local path repository.
+     * Path repos have source == install path, so the normal download/delete cycle would
+     * wipe the user's files before trying to copy from the now-missing source.
+     */
+    protected function isPathRepository(PackageInterface $package): bool
+    {
+        return $package->getDistType() === 'path';
+    }
+
+    /**
      * Override install to remove excluded directories after installation.
+     * Skips entirely for path repositories — their files are already in place.
      *
      * {@inheritDoc}
      */
     public function install(InstalledRepositoryInterface $repo, PackageInterface $package): ?PromiseInterface
     {
+        if ($this->isPathRepository($package)) {
+            $this->io->write("  - <info>Skipping install for path repository:</info> {$package->getPrettyName()}");
+
+            return \React\Promise\resolve(null);
+        }
+
         $promise = parent::install($repo, $package);
 
         return $promise->then(function () use ($package) {
@@ -288,12 +307,72 @@ class Installer extends LibraryInstaller
     }
 
     /**
+     * Call parent::update() solely for its installed.json tracking side-effects.
+     * Sets the skip flag so updateCode() is a no-op, then resets it regardless of outcome.
+     */
+    protected function delegateRepoTracking(InstalledRepositoryInterface $repo, PackageInterface $initial, PackageInterface $target): PromiseInterface
+    {
+        $this->skipUpdateCode = true;
+
+        $resetFlag = function (): void { $this->skipUpdateCode = false; };
+
+        return parent::update($repo, $initial, $target)->then(
+            $resetFlag,
+            function (\Throwable $e) use ($resetFlag): never { $resetFlag(); throw $e; }
+        );
+    }
+
+    /**
+     * No-op hook for parent::update() — skipped when we have already handled the download ourselves.
+     * Overriding this lets parent::update() run only for its repo-tracking side-effects.
+     *
+     * {@inheritDoc}
+     */
+    protected function updateCode(PackageInterface $initial, PackageInterface $target): PromiseInterface
+    {
+        if ($this->skipUpdateCode) {
+            return \React\Promise\resolve(null);
+        }
+
+        return $this->invokeParentUpdateCode($initial, $target);
+    }
+
+    protected function invokeParentUpdateCode(PackageInterface $initial, PackageInterface $target): PromiseInterface
+    {
+        return parent::updateCode($initial, $target);
+    }
+
+    /**
+     * Download a specific package version to the given path using Composer's DownloadManager.
+     * Used for both base (original) and target (new) version fetches during update.
+     */
+    protected function downloadFresh(PackageInterface $package, string $path): PromiseInterface
+    {
+        $dm = $this->composer->getDownloadManager();
+
+        return $dm->download($package, $path)
+            ->then(fn () => $dm->install($package, $path));
+    }
+
+    /**
      * Override update to preserve user customisations (merge strategy) or replace entirely (overwrite).
+     * Skips entirely for path repositories — their files are managed by git/the path repo mechanism.
+     *
+     * Does NOT call parent::update() because that uses GitDownloader::update() which requires a .git
+     * directory. Since we remove .git after initial install (copy-and-own model), we instead do a
+     * fresh download of the target version directly to the install path.
      *
      * {@inheritDoc}
      */
     public function update(InstalledRepositoryInterface $repo, PackageInterface $initial, PackageInterface $target): ?PromiseInterface
     {
+        if ($this->isPathRepository($target)) {
+            $this->io->write("  - <info>Skipping update for path repository:</info> {$target->getPrettyName()}");
+
+            return \React\Promise\resolve(null);
+        }
+
+        $installPath = $this->getInstallPath($target);
         $stashPath = null;
         $basePath = null;
 
@@ -302,31 +381,64 @@ class Installer extends LibraryInstaller
             if ($stashPath !== null) {
                 $basePath = sys_get_temp_dir().'/module-base-'.uniqid('', true);
             }
+        } else {
+            // Overwrite: stash for rollback safety rather than deleting outright.
+            // $basePath stays null, which signals overwrite mode in the callbacks.
+            $stashPath = $this->stashModuleDir($installPath);
         }
 
         $prepareBase = ($basePath !== null)
             ? $this->downloadBase($initial, $basePath)
             : \React\Promise\resolve(null);
 
-        return $prepareBase->then(fn () => parent::update($repo, $initial, $target))->then(
-            function () use ($target, $stashPath, $basePath) {
-                $this->removeExcludedDirectories($target);
-                if ($stashPath !== null) {
-                    $installPath = $this->getInstallPath($target);
-                    $this->mergeStash($stashPath, $basePath, $installPath);
-                    (new Filesystem)->removeDirectory($stashPath);
-                    (new Filesystem)->removeDirectory($basePath);
+        return $prepareBase
+            ->then(fn () => $this->downloadFresh($target, $installPath))
+            ->then(
+                function () use ($repo, $initial, $target, $installPath, $stashPath, $basePath) {
+                    $this->removeExcludedDirectories($target);
+                    if ($basePath !== null) {
+                        // Merge strategy: apply 3-way merge then clean up base temp dir
+                        $this->mergeStash($stashPath, $basePath, $installPath);
+                        (new Filesystem)->removeDirectory($basePath);
+                    }
+                    if ($stashPath !== null) {
+                        // Both strategies: download succeeded — discard the stash
+                        (new Filesystem)->removeDirectory($stashPath);
+                    }
+                    // Delegate repo tracking (installed.json) to parent — skip the download step
+                    // since we have already placed the files ourselves.
+                    return $this->delegateRepoTracking($repo, $initial, $target);
+                },
+                function (\Throwable $e) use ($stashPath, $basePath, $initial) {
+                    if ($stashPath !== null) {
+                        $this->restoreStash($stashPath, $initial);
+                    }
+                    if ($basePath !== null) {
+                        (new Filesystem)->removeDirectory($basePath);
+                    }
+                    throw $e;
                 }
-            },
-            function (\Throwable $e) use ($stashPath, $basePath, $initial) {
-                if ($stashPath !== null) {
-                    $this->restoreStash($stashPath, $initial);
-                }
-                if ($basePath !== null) {
-                    (new Filesystem)->removeDirectory($basePath);
-                }
-                throw $e;
+            );
+    }
+
+    /**
+     * Override uninstall to protect path repository files from deletion.
+     * A `composer remove` on a path repo must never wipe the working source directory.
+     *
+     * {@inheritDoc}
+     */
+    public function uninstall(InstalledRepositoryInterface $repo, PackageInterface $package): ?PromiseInterface
+    {
+        if ($this->isPathRepository($package)) {
+            $this->io->write("  - <info>Skipping uninstall for path repository:</info> {$package->getPrettyName()}");
+
+            if ($repo->hasPackage($package)) {
+                $repo->removePackage($package);
             }
-        );
+
+            return \React\Promise\resolve(null);
+        }
+
+        return parent::uninstall($repo, $package);
     }
 }
