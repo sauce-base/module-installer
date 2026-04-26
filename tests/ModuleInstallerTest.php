@@ -10,7 +10,9 @@ use Composer\Package\Package;
 use Composer\Package\PackageInterface;
 use Composer\Package\RootPackage;
 use Composer\PartialComposer;
+use Composer\Repository\InstalledRepositoryInterface;
 use PHPUnit\Framework\TestCase;
+use React\Promise\PromiseInterface;
 use Saucebase\ModuleInstaller\Exceptions\ModuleInstallerException;
 use Saucebase\ModuleInstaller\Installer;
 use Symfony\Component\Filesystem\Filesystem;
@@ -57,6 +59,30 @@ final class TestableInstaller extends Installer
     public function callRestoreStash(string $stashPath, PackageInterface $package): void
     {
         parent::restoreStash($stashPath, $package);
+    }
+
+    public function callIsPathRepository(PackageInterface $package): bool
+    {
+        return parent::isPathRepository($package);
+    }
+
+    public function callUpdateCode(PackageInterface $initial, PackageInterface $target): PromiseInterface
+    {
+        return $this->updateCode($initial, $target);
+    }
+
+    public function setSkipUpdateCode(bool $value): void
+    {
+        $this->skipUpdateCode = $value;
+    }
+
+    public bool $parentUpdateCodeInvoked = false;
+
+    protected function invokeParentUpdateCode(PackageInterface $initial, PackageInterface $target): PromiseInterface
+    {
+        $this->parentUpdateCodeInvoked = true;
+
+        return parent::invokeParentUpdateCode($initial, $target);
     }
 }
 
@@ -469,5 +495,152 @@ final class ModuleInstallerTest extends TestCase
         $this->assertFileExists($originalPath.'/partial.php');
 
         (new Filesystem)->remove($originalPath);
+    }
+
+    // -------------------------------------------------------------------------
+    // isPathRepository
+    // -------------------------------------------------------------------------
+
+    public function test_is_path_repository_returns_true_for_path_dist_type(): void
+    {
+        $io = $this->createStub(IOInterface::class);
+        $installer = new TestableInstaller($io, null);
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getDistType')->willReturn('path');
+
+        $this->assertTrue($installer->callIsPathRepository($pkg));
+    }
+
+    public function test_is_path_repository_returns_false_for_zip_dist_type(): void
+    {
+        $io = $this->createStub(IOInterface::class);
+        $installer = new TestableInstaller($io, null);
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getDistType')->willReturn('zip');
+
+        $this->assertFalse($installer->callIsPathRepository($pkg));
+    }
+
+    public function test_is_path_repository_returns_false_when_dist_type_is_null(): void
+    {
+        $io = $this->createStub(IOInterface::class);
+        $installer = new TestableInstaller($io, null);
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getDistType')->willReturn(null);
+
+        $this->assertFalse($installer->callIsPathRepository($pkg));
+    }
+
+    // -------------------------------------------------------------------------
+    // install() path-repository guard
+    // -------------------------------------------------------------------------
+
+    public function test_install_logs_skip_message_and_returns_promise_for_path_repo(): void
+    {
+        $io = $this->createMock(IOInterface::class);
+        $io->expects($this->once())
+            ->method('write')
+            ->with($this->stringContains('Skipping install'));
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getDistType')->willReturn('path');
+        $pkg->method('getPrettyName')->willReturn('saucebase/test');
+
+        $repo = $this->createStub(InstalledRepositoryInterface::class);
+        $installer = new TestableInstaller($io, null);
+
+        $promise = $installer->install($repo, $pkg);
+
+        $this->assertNotNull($promise);
+    }
+
+    // -------------------------------------------------------------------------
+    // update() path-repository guard
+    // -------------------------------------------------------------------------
+
+    public function test_update_logs_skip_message_and_returns_promise_for_path_repo(): void
+    {
+        $io = $this->createMock(IOInterface::class);
+        $io->expects($this->once())
+            ->method('write')
+            ->with($this->stringContains('Skipping update'));
+
+        $initial = $this->createStub(PackageInterface::class);
+
+        $target = $this->createStub(PackageInterface::class);
+        $target->method('getDistType')->willReturn('path');
+        $target->method('getPrettyName')->willReturn('saucebase/test');
+
+        $repo = $this->createStub(InstalledRepositoryInterface::class);
+        $installer = new TestableInstaller($io, null);
+
+        $promise = $installer->update($repo, $initial, $target);
+
+        $this->assertNotNull($promise);
+    }
+
+    // -------------------------------------------------------------------------
+    // uninstall() path-repository guard
+    // -------------------------------------------------------------------------
+
+    public function test_uninstall_logs_skip_message_and_removes_package_from_repo(): void
+    {
+        $io = $this->createMock(IOInterface::class);
+        $io->expects($this->once())
+            ->method('write')
+            ->with($this->stringContains('Skipping uninstall'));
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getDistType')->willReturn('path');
+        $pkg->method('getPrettyName')->willReturn('saucebase/test');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(true);
+        $repo->expects($this->once())->method('removePackage')->with($pkg);
+
+        $installer = new TestableInstaller($io, null);
+        $installer->uninstall($repo, $pkg);
+    }
+
+    public function test_uninstall_skips_remove_package_when_package_not_in_repo(): void
+    {
+        $io = $this->createMock(IOInterface::class);
+        $io->expects($this->once())->method('write');
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getDistType')->willReturn('path');
+        $pkg->method('getPrettyName')->willReturn('saucebase/test');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+        $repo->expects($this->never())->method('removePackage');
+
+        $installer = new TestableInstaller($io, null);
+        $installer->uninstall($repo, $pkg);
+    }
+
+    // -------------------------------------------------------------------------
+    // updateCode() skip flag
+    // -------------------------------------------------------------------------
+
+    public function test_update_code_returns_resolved_promise_when_skip_flag_is_set(): void
+    {
+        $io = $this->createStub(IOInterface::class);
+        $installer = new TestableInstaller($io, null);
+        $installer->setSkipUpdateCode(true);
+
+        $initial = $this->createStub(PackageInterface::class);
+        $target = $this->createStub(PackageInterface::class);
+
+        $resolved = false;
+        $installer->callUpdateCode($initial, $target)->then(function () use (&$resolved) {
+            $resolved = true;
+        });
+
+        $this->assertTrue($resolved, 'updateCode should resolve immediately when skip flag is set');
+        $this->assertFalse($installer->parentUpdateCodeInvoked, 'parent::updateCode() must not be called when skip flag is set');
     }
 }
