@@ -12,6 +12,7 @@ use Composer\Package\RootPackage;
 use Composer\PartialComposer;
 use Composer\Repository\InstalledRepositoryInterface;
 use PHPUnit\Framework\TestCase;
+use React\Promise\PromiseInterface;
 use Saucebase\ModuleInstaller\Exceptions\ModuleInstallerException;
 use Saucebase\ModuleInstaller\Installer;
 use Symfony\Component\Filesystem\Filesystem;
@@ -65,7 +66,7 @@ final class TestableInstaller extends Installer
         return parent::isPathRepository($package);
     }
 
-    public function callUpdateCode(PackageInterface $initial, PackageInterface $target): \React\Promise\PromiseInterface
+    public function callUpdateCode(PackageInterface $initial, PackageInterface $target): PromiseInterface
     {
         return $this->updateCode($initial, $target);
     }
@@ -77,7 +78,7 @@ final class TestableInstaller extends Installer
 
     public bool $parentUpdateCodeInvoked = false;
 
-    protected function invokeParentUpdateCode(PackageInterface $initial, PackageInterface $target): \React\Promise\PromiseInterface
+    protected function invokeParentUpdateCode(PackageInterface $initial, PackageInterface $target): PromiseInterface
     {
         $this->parentUpdateCodeInvoked = true;
 

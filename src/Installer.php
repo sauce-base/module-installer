@@ -314,11 +314,16 @@ class Installer extends LibraryInstaller
     {
         $this->skipUpdateCode = true;
 
-        $resetFlag = function (): void { $this->skipUpdateCode = false; };
+        $resetFlag = function (): void {
+            $this->skipUpdateCode = false;
+        };
 
         return parent::update($repo, $initial, $target)->then(
             $resetFlag,
-            function (\Throwable $e) use ($resetFlag): never { $resetFlag(); throw $e; }
+            function (\Throwable $e) use ($resetFlag): never {
+                $resetFlag();
+                throw $e;
+            }
         );
     }
 
@@ -405,6 +410,7 @@ class Installer extends LibraryInstaller
                         // Both strategies: download succeeded — discard the stash
                         (new Filesystem)->removeDirectory($stashPath);
                     }
+
                     // Delegate repo tracking (installed.json) to parent — skip the download step
                     // since we have already placed the files ourselves.
                     return $this->delegateRepoTracking($repo, $initial, $target);
