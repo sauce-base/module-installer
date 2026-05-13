@@ -109,6 +109,11 @@ final class TestableInstaller extends Installer
         parent::copyFrameworkFiles($package);
     }
 
+    public function callFlattenFrameworkFiles(string $jsRoot, string $framework): void
+    {
+        parent::flattenFrameworkFiles($jsRoot, $framework);
+    }
+
     public bool $copyFrameworkFilesInvoked = false;
 
     protected function copyFrameworkFiles(PackageInterface $package): void
@@ -738,21 +743,33 @@ final class ModuleInstallerTest extends TestCase
         $this->assertSame('react', $installer->callGetSelectedFramework());
     }
 
+    public function test_get_selected_framework_returns_null_for_unknown_framework(): void
+    {
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+
+        foreach (['angular', 'solid', '../etc', '/abs', 'Vue', ''] as $unknown) {
+            $installer->setFrontendJsonPath($this->writeFrontendJson(['framework' => $unknown]));
+            $this->assertNull($installer->callGetSelectedFramework(), "Expected null for framework='$unknown'");
+        }
+    }
+
     // -------------------------------------------------------------------------
     // copyFrameworkFiles
     // -------------------------------------------------------------------------
 
     public function test_copy_framework_files_silent_skips_when_no_resources_js_dir(): void
     {
-        $moduleDir = sys_get_temp_dir().'/module-fw-test-'.uniqid('', true);
-        mkdir($moduleDir);
+        $baseDir = sys_get_temp_dir();
+        // Package 'saucebase/no-js' → install path = $baseDir/no-js (no resources/js inside)
+        $moduleDir = $baseDir.'/no-js';
+        mkdir($moduleDir, 0755, true);
 
-        $installer = $this->makeInstallerWithModuleDir(sys_get_temp_dir());
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
         $installer->setFrontendJsonPath($this->writeFrontendJson(['framework' => 'vue']));
 
         $pkg = new Package('saucebase/no-js', '1.0.0.0', '1.0.0');
 
-        // No resources/js dir — should not throw
+        // No resources/js dir — should not throw and should not create anything
         $installer->callCopyFrameworkFiles($pkg);
 
         $this->assertDirectoryDoesNotExist($moduleDir.'/resources/js');
@@ -762,25 +779,23 @@ final class ModuleInstallerTest extends TestCase
 
     public function test_copy_framework_files_silent_skips_when_framework_is_null(): void
     {
-        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
-        $installer->setFrontendJsonPath('/nonexistent/frontend.json');
+        $baseDir = sys_get_temp_dir();
+        // Package 'saucebase/skip-module' → install path = $baseDir/skip-module
+        $moduleDir = $baseDir.'/skip-module';
+        $jsRoot = $moduleDir.'/resources/js';
+        mkdir($jsRoot.'/vue', 0755, true);
+        file_put_contents($jsRoot.'/vue/app.ts', 'content');
 
-        $pkg = $this->createStub(PackageInterface::class);
-        $pkg->method('getName')->willReturn('saucebase/auth');
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+        $installer->setFrontendJsonPath('/nonexistent/frontend.json'); // framework = null
 
-        // getInstallPath would fail without composer, but framework is null so we return before using it
-        // Use a real package with a temp module dir to avoid issues
-        $moduleDir = sys_get_temp_dir().'/module-skip-test-'.uniqid('', true);
-        mkdir($moduleDir.'/resources/js', 0755, true);
+        $pkg = new Package('saucebase/skip-module', '1.0.0.0', '1.0.0');
 
-        $installer2 = $this->makeInstallerWithModuleDir(sys_get_temp_dir());
-        $installer2->setFrontendJsonPath('/nonexistent/frontend.json');
+        $installer->callCopyFrameworkFiles($pkg);
 
-        $pkg2 = new Package('saucebase/skip-module', '1.0.0.0', '1.0.0');
-
-        $installer2->callCopyFrameworkFiles($pkg2);
-
-        $this->assertDirectoryExists($moduleDir.'/resources/js');
+        // Framework subdirs must be untouched — no flattening occurred
+        $this->assertDirectoryExists($jsRoot.'/vue');
+        $this->assertFileDoesNotExist($jsRoot.'/app.ts');
 
         (new Filesystem)->remove($moduleDir);
     }
@@ -833,6 +848,53 @@ final class ModuleInstallerTest extends TestCase
         $this->assertDirectoryDoesNotExist($jsRoot.'/react');
 
         (new Filesystem)->remove($moduleDir);
+    }
+
+    public function test_copy_framework_files_removes_all_known_framework_subdirs(): void
+    {
+        $baseDir = sys_get_temp_dir();
+        // Package 'saucebase/multi-fw' → install path = $baseDir/multi-fw
+        $moduleDir = $baseDir.'/multi-fw';
+        $jsRoot = $moduleDir.'/resources/js';
+        mkdir($jsRoot.'/vue', 0755, true);
+        mkdir($jsRoot.'/react', 0755, true);
+        mkdir($jsRoot.'/svelte', 0755, true);
+        file_put_contents($jsRoot.'/vue/app.ts', 'vue app');
+        file_put_contents($jsRoot.'/react/app.tsx', 'react app');
+        file_put_contents($jsRoot.'/svelte/app.svelte', 'svelte app');
+
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+        $installer->setFrontendJsonPath($this->writeFrontendJson(['framework' => 'vue']));
+
+        $pkg = new Package('saucebase/multi-fw', '1.0.0.0', '1.0.0');
+        $installer->callCopyFrameworkFiles($pkg);
+
+        $this->assertFileExists($jsRoot.'/app.ts');
+        $this->assertDirectoryDoesNotExist($jsRoot.'/vue');
+        $this->assertDirectoryDoesNotExist($jsRoot.'/react');
+        $this->assertDirectoryDoesNotExist($jsRoot.'/svelte');
+
+        (new Filesystem)->remove($moduleDir);
+    }
+
+    public function test_flatten_framework_files_is_callable_on_arbitrary_path(): void
+    {
+        $jsRoot = sys_get_temp_dir().'/flatten-direct-'.uniqid('', true);
+        mkdir($jsRoot.'/vue/pages', 0755, true);
+        mkdir($jsRoot.'/react', 0755, true);
+        file_put_contents($jsRoot.'/vue/app.ts', 'vue app');
+        file_put_contents($jsRoot.'/vue/pages/Login.vue', 'login');
+        file_put_contents($jsRoot.'/react/app.tsx', 'react app');
+
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+        $installer->callFlattenFrameworkFiles($jsRoot, 'vue');
+
+        $this->assertFileExists($jsRoot.'/app.ts');
+        $this->assertFileExists($jsRoot.'/pages/Login.vue');
+        $this->assertDirectoryDoesNotExist($jsRoot.'/vue');
+        $this->assertDirectoryDoesNotExist($jsRoot.'/react');
+
+        (new Filesystem)->remove($jsRoot);
     }
 
     // -------------------------------------------------------------------------
