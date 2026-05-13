@@ -117,7 +117,7 @@ final class TestableInstaller extends Installer
         parent::copyFrameworkFiles($package);
     }
 
-    protected function parentInstall(\Composer\Repository\InstalledRepositoryInterface $repo, PackageInterface $package): \React\Promise\PromiseInterface
+    protected function parentInstall(InstalledRepositoryInterface $repo, PackageInterface $package): PromiseInterface
     {
         return \React\Promise\resolve(null);
     }
