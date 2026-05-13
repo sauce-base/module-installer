@@ -84,6 +84,43 @@ final class TestableInstaller extends Installer
 
         return parent::invokeParentUpdateCode($initial, $target);
     }
+
+    // ---- Framework-aware file copying ----
+
+    private string $frontendJsonPath = '';
+
+    public function setFrontendJsonPath(string $path): void
+    {
+        $this->frontendJsonPath = $path;
+    }
+
+    protected function getFrontendJsonPath(): string
+    {
+        return $this->frontendJsonPath !== '' ? $this->frontendJsonPath : parent::getFrontendJsonPath();
+    }
+
+    public function callGetSelectedFramework(): ?string
+    {
+        return parent::getSelectedFramework();
+    }
+
+    public function callCopyFrameworkFiles(PackageInterface $package): void
+    {
+        parent::copyFrameworkFiles($package);
+    }
+
+    public bool $copyFrameworkFilesInvoked = false;
+
+    protected function copyFrameworkFiles(PackageInterface $package): void
+    {
+        $this->copyFrameworkFilesInvoked = true;
+        parent::copyFrameworkFiles($package);
+    }
+
+    protected function parentInstall(\Composer\Repository\InstalledRepositoryInterface $repo, PackageInterface $package): \React\Promise\PromiseInterface
+    {
+        return \React\Promise\resolve(null);
+    }
 }
 
 final class ModuleInstallerTest extends TestCase
@@ -642,5 +679,209 @@ final class ModuleInstallerTest extends TestCase
 
         $this->assertTrue($resolved, 'updateCode should resolve immediately when skip flag is set');
         $this->assertFalse($installer->parentUpdateCodeInvoked, 'parent::updateCode() must not be called when skip flag is set');
+    }
+
+    // -------------------------------------------------------------------------
+    // getSelectedFramework
+    // -------------------------------------------------------------------------
+
+    public function test_get_selected_framework_returns_null_when_frontend_json_missing(): void
+    {
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+        $installer->setFrontendJsonPath('/nonexistent/path/frontend.json');
+
+        $this->assertNull($installer->callGetSelectedFramework());
+    }
+
+    public function test_get_selected_framework_returns_null_when_framework_key_is_null(): void
+    {
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+        $installer->setFrontendJsonPath($this->writeFrontendJson(['framework' => null]));
+
+        $this->assertNull($installer->callGetSelectedFramework());
+    }
+
+    public function test_get_selected_framework_returns_null_when_json_is_invalid(): void
+    {
+        $path = sys_get_temp_dir().'/frontend-invalid-'.uniqid('', true).'.json';
+        file_put_contents($path, 'not-valid-json{{{');
+
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+        $installer->setFrontendJsonPath($path);
+
+        $this->assertNull($installer->callGetSelectedFramework());
+
+        unlink($path);
+    }
+
+    public function test_get_selected_framework_returns_null_when_dev_mode_is_true(): void
+    {
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+        $installer->setFrontendJsonPath($this->writeFrontendJson(['framework' => 'vue', 'dev' => true]));
+
+        $this->assertNull($installer->callGetSelectedFramework());
+    }
+
+    public function test_get_selected_framework_returns_vue_when_set(): void
+    {
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+        $installer->setFrontendJsonPath($this->writeFrontendJson(['framework' => 'vue']));
+
+        $this->assertSame('vue', $installer->callGetSelectedFramework());
+    }
+
+    public function test_get_selected_framework_returns_react_when_set(): void
+    {
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+        $installer->setFrontendJsonPath($this->writeFrontendJson(['framework' => 'react']));
+
+        $this->assertSame('react', $installer->callGetSelectedFramework());
+    }
+
+    // -------------------------------------------------------------------------
+    // copyFrameworkFiles
+    // -------------------------------------------------------------------------
+
+    public function test_copy_framework_files_silent_skips_when_no_resources_js_dir(): void
+    {
+        $moduleDir = sys_get_temp_dir().'/module-fw-test-'.uniqid('', true);
+        mkdir($moduleDir);
+
+        $installer = $this->makeInstallerWithModuleDir(sys_get_temp_dir());
+        $installer->setFrontendJsonPath($this->writeFrontendJson(['framework' => 'vue']));
+
+        $pkg = new Package('saucebase/no-js', '1.0.0.0', '1.0.0');
+
+        // No resources/js dir — should not throw
+        $installer->callCopyFrameworkFiles($pkg);
+
+        $this->assertDirectoryDoesNotExist($moduleDir.'/resources/js');
+
+        (new Filesystem)->remove($moduleDir);
+    }
+
+    public function test_copy_framework_files_silent_skips_when_framework_is_null(): void
+    {
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+        $installer->setFrontendJsonPath('/nonexistent/frontend.json');
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getName')->willReturn('saucebase/auth');
+
+        // getInstallPath would fail without composer, but framework is null so we return before using it
+        // Use a real package with a temp module dir to avoid issues
+        $moduleDir = sys_get_temp_dir().'/module-skip-test-'.uniqid('', true);
+        mkdir($moduleDir.'/resources/js', 0755, true);
+
+        $installer2 = $this->makeInstallerWithModuleDir(sys_get_temp_dir());
+        $installer2->setFrontendJsonPath('/nonexistent/frontend.json');
+
+        $pkg2 = new Package('saucebase/skip-module', '1.0.0.0', '1.0.0');
+
+        $installer2->callCopyFrameworkFiles($pkg2);
+
+        $this->assertDirectoryExists($moduleDir.'/resources/js');
+
+        (new Filesystem)->remove($moduleDir);
+    }
+
+    public function test_copy_framework_files_hard_fails_when_framework_subdir_missing(): void
+    {
+        $baseDir = sys_get_temp_dir();
+        // Package 'saucebase/vue-only' → module dir 'vue-only' → install path = $baseDir/vue-only
+        $moduleDir = $baseDir.'/vue-only';
+        mkdir($moduleDir.'/resources/js', 0755, true);
+
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+        $installer->setFrontendJsonPath($this->writeFrontendJson(['framework' => 'react']));
+
+        $pkg = new Package('saucebase/vue-only', '1.0.0.0', '1.0.0');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/does not support react/');
+
+        try {
+            $installer->callCopyFrameworkFiles($pkg);
+        } finally {
+            (new Filesystem)->remove($moduleDir);
+        }
+    }
+
+    public function test_copy_framework_files_flattens_files_and_removes_framework_subdirs(): void
+    {
+        $baseDir = sys_get_temp_dir();
+        // Package 'saucebase/flatten-test' → module dir 'flatten-test' → install path = $baseDir/flatten-test
+        $moduleDir = $baseDir.'/flatten-test';
+        $jsRoot = $moduleDir.'/resources/js';
+        mkdir($jsRoot.'/vue/pages', 0755, true);
+        mkdir($jsRoot.'/react', 0755, true);
+        file_put_contents($jsRoot.'/vue/app.ts', 'vue app');
+        file_put_contents($jsRoot.'/vue/pages/Login.vue', 'login page');
+        file_put_contents($jsRoot.'/react/app.tsx', 'react app');
+
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+        $installer->setFrontendJsonPath($this->writeFrontendJson(['framework' => 'vue']));
+
+        $pkg = new Package('saucebase/flatten-test', '1.0.0.0', '1.0.0');
+
+        $installer->callCopyFrameworkFiles($pkg);
+
+        $this->assertFileExists($jsRoot.'/app.ts');
+        $this->assertSame('vue app', file_get_contents($jsRoot.'/app.ts'));
+        $this->assertFileExists($jsRoot.'/pages/Login.vue');
+        $this->assertDirectoryDoesNotExist($jsRoot.'/vue');
+        $this->assertDirectoryDoesNotExist($jsRoot.'/react');
+
+        (new Filesystem)->remove($moduleDir);
+    }
+
+    // -------------------------------------------------------------------------
+    // Integration: install() invokes copyFrameworkFiles
+    // -------------------------------------------------------------------------
+
+    public function test_install_invokes_copy_framework_files_for_non_path_repo(): void
+    {
+        $io = $this->createStub(IOInterface::class);
+        $installer = new TestableInstaller($io, null);
+        $installer->setFrontendJsonPath('/nonexistent/frontend.json'); // returns null → skips copy
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getDistType')->willReturn('zip');
+        $pkg->method('getPrettyName')->willReturn('saucebase/auth');
+
+        $repo = $this->createStub(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+
+        $resolved = false;
+        $installer->install($repo, $pkg)->then(function () use (&$resolved) {
+            $resolved = true;
+        });
+
+        $this->assertTrue($resolved);
+        $this->assertTrue($installer->copyFrameworkFilesInvoked);
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    /** @param array<string, mixed> $data */
+    private function writeFrontendJson(array $data): string
+    {
+        $path = sys_get_temp_dir().'/frontend-'.uniqid('', true).'.json';
+        file_put_contents($path, json_encode($data));
+
+        return $path;
+    }
+
+    private function makeInstallerWithModuleDir(string $baseDir): TestableInstaller
+    {
+        $io = $this->createStub(IOInterface::class);
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-dir' => $baseDir]);
+        $composer->method('getPackage')->willReturn($root);
+
+        return new TestableInstaller($io, $composer);
     }
 }

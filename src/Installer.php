@@ -286,7 +286,96 @@ class Installer extends LibraryInstaller
     }
 
     /**
-     * Override install to remove excluded directories after installation.
+     * Returns the path to frontend.json. Extracted for testability.
+     */
+    protected function getFrontendJsonPath(): string
+    {
+        return getcwd().'/frontend.json';
+    }
+
+    /**
+     * Reads the selected framework from frontend.json.
+     * Returns null when: file missing, invalid JSON, dev mode active, or framework not set.
+     */
+    protected function getSelectedFramework(): ?string
+    {
+        $path = $this->getFrontendJsonPath();
+
+        if (! file_exists($path)) {
+            return null;
+        }
+
+        $data = json_decode(file_get_contents($path), true);
+
+        if (! is_array($data) || ($data['dev'] ?? false)) {
+            return null;
+        }
+
+        $framework = $data['framework'] ?? null;
+
+        return is_string($framework) ? $framework : null;
+    }
+
+    /**
+     * Copies the selected framework's JS files flat into resources/js/ and removes framework subdirs.
+     * Silent-skips when: no resources/js dir (PHP-only module) or no framework selected.
+     * Hard-fails when resources/js exists but the selected framework subdir is missing.
+     */
+    protected function copyFrameworkFiles(PackageInterface $package): void
+    {
+        $jsRoot = $this->getInstallPath($package).'/resources/js';
+
+        if (! is_dir($jsRoot)) {
+            return;
+        }
+
+        $framework = $this->getSelectedFramework();
+
+        if (! $framework) {
+            return;
+        }
+
+        $fwPath = $jsRoot.'/'.$framework;
+
+        if (! is_dir($fwPath)) {
+            throw new \RuntimeException(sprintf(
+                '%s does not support %s. Check the module\'s documentation for framework support.',
+                $package->getName(),
+                $framework
+            ));
+        }
+
+        $this->copyDirectory($fwPath, $jsRoot);
+
+        $fs = new Filesystem;
+        $fs->removeDirectory($jsRoot.'/vue');
+        $fs->removeDirectory($jsRoot.'/react');
+    }
+
+    /**
+     * Recursively copies all files from $source into $dest, preserving relative paths.
+     */
+    private function copyDirectory(string $source, string $dest): void
+    {
+        $fs = new SymfonyFilesystem;
+        $finder = (new Finder)->files()->in($source);
+
+        foreach ($finder as $file) {
+            $fs->copy($file->getPathname(), $dest.'/'.$file->getRelativePathname(), true);
+        }
+    }
+
+    /**
+     * Proxy for parent::install() — extracted for testability.
+     * Mirrors the invokeParentUpdateCode() pattern.
+     */
+    protected function parentInstall(InstalledRepositoryInterface $repo, PackageInterface $package): PromiseInterface
+    {
+        return parent::install($repo, $package);
+    }
+
+    /**
+     * Override install to remove excluded directories and deploy framework files after installation.
      * Skips entirely for path repositories — their files are already in place.
      *
      * {@inheritDoc}
@@ -299,10 +388,11 @@ class Installer extends LibraryInstaller
             return \React\Promise\resolve(null);
         }
 
-        $promise = parent::install($repo, $package);
+        $promise = $this->parentInstall($repo, $package);
 
         return $promise->then(function () use ($package) {
             $this->removeExcludedDirectories($package);
+            $this->copyFrameworkFiles($package);
         });
     }
 
@@ -401,6 +491,7 @@ class Installer extends LibraryInstaller
             ->then(
                 function () use ($repo, $initial, $target, $installPath, $stashPath, $basePath) {
                     $this->removeExcludedDirectories($target);
+                    $this->copyFrameworkFiles($target);
                     if ($basePath !== null) {
                         // Merge strategy: apply 3-way merge then clean up base temp dir
                         $this->mergeStash($stashPath, $basePath, $installPath);
