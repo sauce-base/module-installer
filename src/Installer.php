@@ -28,6 +28,8 @@ class Installer extends LibraryInstaller
 
     const DEFAULT_UPDATE_STRATEGY = 'merge';
 
+    const KNOWN_FRAMEWORKS = ['vue', 'react', 'svelte'];
+
     protected bool $skipUpdateCode = false;
 
     const UPDATE_STRATEGY_MERGE = 'merge';
@@ -286,7 +288,110 @@ class Installer extends LibraryInstaller
     }
 
     /**
-     * Override install to remove excluded directories after installation.
+     * Returns the path to frontend.json. Extracted for testability.
+     */
+    protected function getFrontendJsonPath(): string
+    {
+        return getcwd().'/frontend.json';
+    }
+
+    /**
+     * Reads the selected framework from frontend.json.
+     * Returns null when: file missing, invalid JSON, dev mode active, framework not set, or invalid name.
+     */
+    protected function getSelectedFramework(): ?string
+    {
+        $path = $this->getFrontendJsonPath();
+
+        if (! file_exists($path)) {
+            return null;
+        }
+
+        $data = json_decode(file_get_contents($path), true);
+
+        if (! is_array($data) || ($data['dev'] ?? false)) {
+            return null;
+        }
+
+        $framework = $data['framework'] ?? null;
+
+        if (! is_string($framework) || ! in_array($framework, self::KNOWN_FRAMEWORKS, true)) {
+            return null;
+        }
+
+        return $framework;
+    }
+
+    /**
+     * Copies the selected framework's JS files flat into resources/js/ and removes all framework subdirs.
+     * Silent-skips when: no resources/js dir (PHP-only module) or no framework selected.
+     * Hard-fails when resources/js exists but the selected framework subdir is missing.
+     */
+    protected function copyFrameworkFiles(PackageInterface $package): void
+    {
+        $jsRoot = $this->getInstallPath($package).'/resources/js';
+
+        if (! is_dir($jsRoot)) {
+            return;
+        }
+
+        $framework = $this->getSelectedFramework();
+
+        if (! $framework) {
+            return;
+        }
+
+        $fwPath = $jsRoot.'/'.$framework;
+
+        if (! is_dir($fwPath)) {
+            throw new \RuntimeException(sprintf(
+                '%s does not support %s. Check the module\'s documentation for framework support.',
+                $package->getName(),
+                $framework
+            ));
+        }
+
+        $this->flattenFrameworkFiles($jsRoot, $framework);
+    }
+
+    /**
+     * Copies files from $jsRoot/$framework flat into $jsRoot, then removes all known framework subdirs.
+     * Extracted so the same flattening can be applied to any path (e.g. the merge-base temp dir).
+     */
+    protected function flattenFrameworkFiles(string $jsRoot, string $framework): void
+    {
+        $this->copyDirectory($jsRoot.'/'.$framework, $jsRoot);
+
+        $fs = new Filesystem;
+        foreach (self::KNOWN_FRAMEWORKS as $fw) {
+            $fs->removeDirectory($jsRoot.'/'.$fw);
+        }
+    }
+
+    /**
+     * Recursively copies all files from $source into $dest, preserving relative paths.
+     */
+    private function copyDirectory(string $source, string $dest): void
+    {
+        $fs = new SymfonyFilesystem;
+        $finder = (new Finder)->files()->in($source);
+
+        foreach ($finder as $file) {
+            $fs->copy($file->getPathname(), $dest.'/'.$file->getRelativePathname(), true);
+        }
+    }
+
+    /**
+     * Proxy for parent::install() — extracted for testability.
+     * Mirrors the invokeParentUpdateCode() pattern.
+     */
+    protected function parentInstall(InstalledRepositoryInterface $repo, PackageInterface $package): PromiseInterface
+    {
+        return parent::install($repo, $package);
+    }
+
+    /**
+     * Override install to remove excluded directories and deploy framework files after installation.
      * Skips entirely for path repositories — their files are already in place.
      *
      * {@inheritDoc}
@@ -299,10 +404,11 @@ class Installer extends LibraryInstaller
             return \React\Promise\resolve(null);
         }
 
-        $promise = parent::install($repo, $package);
+        $promise = $this->parentInstall($repo, $package);
 
         return $promise->then(function () use ($package) {
             $this->removeExcludedDirectories($package);
+            $this->copyFrameworkFiles($package);
         });
     }
 
@@ -401,8 +507,18 @@ class Installer extends LibraryInstaller
             ->then(
                 function () use ($repo, $initial, $target, $installPath, $stashPath, $basePath) {
                     $this->removeExcludedDirectories($target);
+                    $this->copyFrameworkFiles($target);
                     if ($basePath !== null) {
-                        // Merge strategy: apply 3-way merge then clean up base temp dir
+                        // Merge strategy: flatten the base so all 3 sides share the same file layout.
+                        // Without this, mergeStash() would compare flattened stash files (e.g. app.ts)
+                        // against unflattened base files (e.g. vue/app.ts), misclassifying every file
+                        // as user-added and silently discarding all upstream changes.
+                        $framework = $this->getSelectedFramework();
+                        $baseJsRoot = $basePath.'/resources/js';
+                        if ($framework && is_dir($baseJsRoot.'/'.$framework)) {
+                            $this->flattenFrameworkFiles($baseJsRoot, $framework);
+                        }
+                        // Apply 3-way merge then clean up base temp dir
                         $this->mergeStash($stashPath, $basePath, $installPath);
                         (new Filesystem)->removeDirectory($basePath);
                     }
