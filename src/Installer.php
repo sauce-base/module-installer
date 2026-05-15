@@ -401,6 +401,10 @@ class Installer extends LibraryInstaller
         if ($this->isPathRepository($package)) {
             $this->io->write("  - <info>Skipping install for path repository:</info> {$package->getPrettyName()}");
 
+            if (! $repo->hasPackage($package)) {
+                $repo->addPackage(clone $package);
+            }
+
             return \React\Promise\resolve(null);
         }
 
@@ -479,6 +483,10 @@ class Installer extends LibraryInstaller
     {
         if ($this->isPathRepository($target)) {
             $this->io->write("  - <info>Skipping update for path repository:</info> {$target->getPrettyName()}");
+
+            if (! $repo->hasPackage($target)) {
+                $repo->addPackage(clone $target);
+            }
 
             return \React\Promise\resolve(null);
         }
