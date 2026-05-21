@@ -599,6 +599,38 @@ final class ModuleInstallerTest extends TestCase
         $this->assertNotNull($promise);
     }
 
+    public function test_install_registers_package_in_repo_when_not_already_present_for_path_repo(): void
+    {
+        $io = $this->createStub(IOInterface::class);
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getDistType')->willReturn('path');
+        $pkg->method('getPrettyName')->willReturn('saucebase/test');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+        $repo->expects($this->once())->method('addPackage');
+
+        $installer = new TestableInstaller($io, null);
+        $installer->install($repo, $pkg);
+    }
+
+    public function test_install_does_not_register_package_in_repo_when_already_present_for_path_repo(): void
+    {
+        $io = $this->createStub(IOInterface::class);
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getDistType')->willReturn('path');
+        $pkg->method('getPrettyName')->willReturn('saucebase/test');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(true);
+        $repo->expects($this->never())->method('addPackage');
+
+        $installer = new TestableInstaller($io, null);
+        $installer->install($repo, $pkg);
+    }
+
     // -------------------------------------------------------------------------
     // update() path-repository guard
     // -------------------------------------------------------------------------
@@ -622,6 +654,64 @@ final class ModuleInstallerTest extends TestCase
         $promise = $installer->update($repo, $initial, $target);
 
         $this->assertNotNull($promise);
+    }
+
+    public function test_update_registers_package_in_repo_when_not_already_present_for_path_repo(): void
+    {
+        $io = $this->createStub(IOInterface::class);
+
+        $initial = $this->createStub(PackageInterface::class);
+
+        $target = $this->createStub(PackageInterface::class);
+        $target->method('getDistType')->willReturn('path');
+        $target->method('getPrettyName')->willReturn('saucebase/test');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+        $repo->expects($this->never())->method('removePackage');
+        $repo->expects($this->once())->method('addPackage');
+
+        $installer = new TestableInstaller($io, null);
+        $installer->update($repo, $initial, $target);
+    }
+
+    public function test_update_replaces_initial_with_target_in_repo_for_path_repo(): void
+    {
+        $io = $this->createStub(IOInterface::class);
+
+        $initial = $this->createStub(PackageInterface::class);
+
+        $target = $this->createStub(PackageInterface::class);
+        $target->method('getDistType')->willReturn('path');
+        $target->method('getPrettyName')->willReturn('saucebase/test');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')
+            ->willReturnCallback(fn (PackageInterface $pkg) => $pkg === $initial);
+        $repo->expects($this->once())->method('removePackage')->with($initial);
+        $repo->expects($this->once())->method('addPackage');
+
+        $installer = new TestableInstaller($io, null);
+        $installer->update($repo, $initial, $target);
+    }
+
+    public function test_update_does_not_register_package_in_repo_when_already_present_for_path_repo(): void
+    {
+        $io = $this->createStub(IOInterface::class);
+
+        $initial = $this->createStub(PackageInterface::class);
+
+        $target = $this->createStub(PackageInterface::class);
+        $target->method('getDistType')->willReturn('path');
+        $target->method('getPrettyName')->willReturn('saucebase/test');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(true);
+        $repo->expects($this->once())->method('removePackage')->with($initial);
+        $repo->expects($this->never())->method('addPackage');
+
+        $installer = new TestableInstaller($io, null);
+        $installer->update($repo, $initial, $target);
     }
 
     // -------------------------------------------------------------------------
