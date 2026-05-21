@@ -484,6 +484,10 @@ class Installer extends LibraryInstaller
         if ($this->isPathRepository($target)) {
             $this->io->write("  - <info>Skipping update for path repository:</info> {$target->getPrettyName()}");
 
+            if ($repo->hasPackage($initial)) {
+                $repo->removePackage($initial);
+            }
+
             if (! $repo->hasPackage($target)) {
                 $repo->addPackage(clone $target);
             }
