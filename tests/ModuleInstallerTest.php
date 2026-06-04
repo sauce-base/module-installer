@@ -1036,4 +1036,24 @@ final class ModuleInstallerTest extends TestCase
 
         return new TestableInstaller($io, $composer);
     }
+
+    public function test_flatten_framework_files_removes_stale_root_file_from_other_framework(): void
+    {
+        $jsRoot = sys_get_temp_dir().'/flatten-stale-'.uniqid('', true);
+        mkdir($jsRoot.'/vue', 0755, true);
+        mkdir($jsRoot.'/react', 0755, true);
+        file_put_contents($jsRoot.'/app.ts', 'stale vue root file');
+        file_put_contents($jsRoot.'/vue/app.ts', 'vue app');
+        file_put_contents($jsRoot.'/react/app.tsx', 'react app');
+
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+        $installer->callFlattenFrameworkFiles($jsRoot, 'react');
+
+        $this->assertFileExists($jsRoot.'/app.tsx');
+        $this->assertFileDoesNotExist($jsRoot.'/app.ts');
+        $this->assertDirectoryDoesNotExist($jsRoot.'/vue');
+        $this->assertDirectoryDoesNotExist($jsRoot.'/react');
+
+        (new Filesystem)->remove($jsRoot);
+    }
 }

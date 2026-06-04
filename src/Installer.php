@@ -360,11 +360,38 @@ class Installer extends LibraryInstaller
      */
     protected function flattenFrameworkFiles(string $jsRoot, string $framework): void
     {
+        $targetPaths = [];
+        if (is_dir($jsRoot.'/'.$framework)) {
+            foreach ((new Finder)->files()->in($jsRoot.'/'.$framework) as $f) {
+                $targetPaths[$f->getRelativePathname()] = true;
+            }
+        }
+
+        $stale = [];
+        foreach (self::KNOWN_FRAMEWORKS as $fw) {
+            if ($fw === $framework || ! is_dir($jsRoot.'/'.$fw)) {
+                continue;
+            }
+            foreach ((new Finder)->files()->in($jsRoot.'/'.$fw) as $f) {
+                $rel = $f->getRelativePathname();
+                if (! isset($targetPaths[$rel])) {
+                    $stale[] = $rel;
+                }
+            }
+        }
+
         $this->copyDirectory($jsRoot.'/'.$framework, $jsRoot);
 
         $fs = new Filesystem;
         foreach (self::KNOWN_FRAMEWORKS as $fw) {
             $fs->removeDirectory($jsRoot.'/'.$fw);
+        }
+
+        $sfFs = new SymfonyFilesystem;
+        foreach ($stale as $rel) {
+            if (file_exists($jsRoot.'/'.$rel)) {
+                $sfFs->remove($jsRoot.'/'.$rel);
+            }
         }
     }
 
