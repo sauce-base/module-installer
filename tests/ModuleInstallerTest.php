@@ -114,6 +114,17 @@ final class TestableInstaller extends Installer
         parent::flattenFrameworkFiles($jsRoot, $framework);
     }
 
+    public ?bool $forcePathRepository = null;
+
+    protected function isPathRepository(PackageInterface $package): bool
+    {
+        if ($this->forcePathRepository !== null) {
+            return $this->forcePathRepository;
+        }
+
+        return parent::isPathRepository($package);
+    }
+
     public bool $copyFrameworkFilesInvoked = false;
 
     protected function copyFrameworkFiles(PackageInterface $package): void
@@ -543,37 +554,69 @@ final class ModuleInstallerTest extends TestCase
     // isPathRepository
     // -------------------------------------------------------------------------
 
-    public function test_is_path_repository_returns_true_for_path_dist_type(): void
+    public function test_is_path_repository_returns_true_when_dist_type_is_path_and_install_path_is_symlink(): void
     {
-        $io = $this->createStub(IOInterface::class);
-        $installer = new TestableInstaller($io, null);
+        $baseDir = sys_get_temp_dir().'/path-repo-symlink-'.uniqid('', true);
+        $target = $baseDir.'/source';
+        mkdir($target, 0755, true);
+        symlink($target, $baseDir.'/test-module');
 
-        $pkg = $this->createStub(PackageInterface::class);
-        $pkg->method('getDistType')->willReturn('path');
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('path');
 
         $this->assertTrue($installer->callIsPathRepository($pkg));
+
+        (new Filesystem)->remove($baseDir);
     }
 
-    public function test_is_path_repository_returns_false_for_zip_dist_type(): void
+    public function test_is_path_repository_returns_false_when_dist_type_is_path_but_install_path_is_real_directory(): void
     {
-        $io = $this->createStub(IOInterface::class);
-        $installer = new TestableInstaller($io, null);
+        // Bug scenario: module installed from Packagist lands in modules/ as a real directory.
+        $baseDir = sys_get_temp_dir().'/path-repo-realdir-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
 
-        $pkg = $this->createStub(PackageInterface::class);
-        $pkg->method('getDistType')->willReturn('zip');
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('path');
+
+        $this->assertFalse($installer->callIsPathRepository($pkg));
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    public function test_is_path_repository_returns_false_when_dist_type_is_path_but_install_path_does_not_exist(): void
+    {
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+        $pkg = new Package('saucebase/nonexistent-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('path');
 
         $this->assertFalse($installer->callIsPathRepository($pkg));
     }
 
-    public function test_is_path_repository_returns_false_when_dist_type_is_null(): void
+    public function test_is_path_repository_returns_true_when_dist_type_is_path_and_install_path_has_git_dir(): void
     {
-        $io = $this->createStub(IOInterface::class);
-        $installer = new TestableInstaller($io, null);
+        $baseDir = sys_get_temp_dir().'/path-repo-gitclone-'.uniqid('', true);
+        mkdir($baseDir.'/test-module/.git', 0755, true);
 
-        $pkg = $this->createStub(PackageInterface::class);
-        $pkg->method('getDistType')->willReturn(null);
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('path');
 
-        $this->assertFalse($installer->callIsPathRepository($pkg));
+        $this->assertTrue($installer->callIsPathRepository($pkg));
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    public function test_is_path_repository_returns_false_for_non_path_dist_types(): void
+    {
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+
+        foreach (['zip', 'tar', null] as $distType) {
+            $pkg = $this->createStub(PackageInterface::class);
+            $pkg->method('getDistType')->willReturn($distType);
+            $this->assertFalse($installer->callIsPathRepository($pkg), "Expected false for distType=$distType");
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -588,11 +631,11 @@ final class ModuleInstallerTest extends TestCase
             ->with($this->stringContains('Skipping install'));
 
         $pkg = $this->createStub(PackageInterface::class);
-        $pkg->method('getDistType')->willReturn('path');
         $pkg->method('getPrettyName')->willReturn('saucebase/test');
 
         $repo = $this->createStub(InstalledRepositoryInterface::class);
         $installer = new TestableInstaller($io, null);
+        $installer->forcePathRepository = true;
 
         $promise = $installer->install($repo, $pkg);
 
@@ -604,7 +647,6 @@ final class ModuleInstallerTest extends TestCase
         $io = $this->createStub(IOInterface::class);
 
         $pkg = $this->createStub(PackageInterface::class);
-        $pkg->method('getDistType')->willReturn('path');
         $pkg->method('getPrettyName')->willReturn('saucebase/test');
 
         $repo = $this->createMock(InstalledRepositoryInterface::class);
@@ -612,6 +654,7 @@ final class ModuleInstallerTest extends TestCase
         $repo->expects($this->once())->method('addPackage');
 
         $installer = new TestableInstaller($io, null);
+        $installer->forcePathRepository = true;
         $installer->install($repo, $pkg);
     }
 
@@ -620,7 +663,6 @@ final class ModuleInstallerTest extends TestCase
         $io = $this->createStub(IOInterface::class);
 
         $pkg = $this->createStub(PackageInterface::class);
-        $pkg->method('getDistType')->willReturn('path');
         $pkg->method('getPrettyName')->willReturn('saucebase/test');
 
         $repo = $this->createMock(InstalledRepositoryInterface::class);
@@ -628,6 +670,7 @@ final class ModuleInstallerTest extends TestCase
         $repo->expects($this->never())->method('addPackage');
 
         $installer = new TestableInstaller($io, null);
+        $installer->forcePathRepository = true;
         $installer->install($repo, $pkg);
     }
 
@@ -645,11 +688,11 @@ final class ModuleInstallerTest extends TestCase
         $initial = $this->createStub(PackageInterface::class);
 
         $target = $this->createStub(PackageInterface::class);
-        $target->method('getDistType')->willReturn('path');
         $target->method('getPrettyName')->willReturn('saucebase/test');
 
         $repo = $this->createStub(InstalledRepositoryInterface::class);
         $installer = new TestableInstaller($io, null);
+        $installer->forcePathRepository = true;
 
         $promise = $installer->update($repo, $initial, $target);
 
@@ -663,7 +706,6 @@ final class ModuleInstallerTest extends TestCase
         $initial = $this->createStub(PackageInterface::class);
 
         $target = $this->createStub(PackageInterface::class);
-        $target->method('getDistType')->willReturn('path');
         $target->method('getPrettyName')->willReturn('saucebase/test');
 
         $repo = $this->createMock(InstalledRepositoryInterface::class);
@@ -672,6 +714,7 @@ final class ModuleInstallerTest extends TestCase
         $repo->expects($this->once())->method('addPackage');
 
         $installer = new TestableInstaller($io, null);
+        $installer->forcePathRepository = true;
         $installer->update($repo, $initial, $target);
     }
 
@@ -682,7 +725,6 @@ final class ModuleInstallerTest extends TestCase
         $initial = $this->createStub(PackageInterface::class);
 
         $target = $this->createStub(PackageInterface::class);
-        $target->method('getDistType')->willReturn('path');
         $target->method('getPrettyName')->willReturn('saucebase/test');
 
         $repo = $this->createMock(InstalledRepositoryInterface::class);
@@ -692,6 +734,7 @@ final class ModuleInstallerTest extends TestCase
         $repo->expects($this->once())->method('addPackage');
 
         $installer = new TestableInstaller($io, null);
+        $installer->forcePathRepository = true;
         $installer->update($repo, $initial, $target);
     }
 
@@ -702,7 +745,6 @@ final class ModuleInstallerTest extends TestCase
         $initial = $this->createStub(PackageInterface::class);
 
         $target = $this->createStub(PackageInterface::class);
-        $target->method('getDistType')->willReturn('path');
         $target->method('getPrettyName')->willReturn('saucebase/test');
 
         $repo = $this->createMock(InstalledRepositoryInterface::class);
@@ -711,6 +753,7 @@ final class ModuleInstallerTest extends TestCase
         $repo->expects($this->never())->method('addPackage');
 
         $installer = new TestableInstaller($io, null);
+        $installer->forcePathRepository = true;
         $installer->update($repo, $initial, $target);
     }
 
@@ -726,7 +769,6 @@ final class ModuleInstallerTest extends TestCase
             ->with($this->stringContains('Skipping uninstall'));
 
         $pkg = $this->createStub(PackageInterface::class);
-        $pkg->method('getDistType')->willReturn('path');
         $pkg->method('getPrettyName')->willReturn('saucebase/test');
 
         $repo = $this->createMock(InstalledRepositoryInterface::class);
@@ -734,6 +776,7 @@ final class ModuleInstallerTest extends TestCase
         $repo->expects($this->once())->method('removePackage')->with($pkg);
 
         $installer = new TestableInstaller($io, null);
+        $installer->forcePathRepository = true;
         $installer->uninstall($repo, $pkg);
     }
 
@@ -743,7 +786,6 @@ final class ModuleInstallerTest extends TestCase
         $io->expects($this->once())->method('write');
 
         $pkg = $this->createStub(PackageInterface::class);
-        $pkg->method('getDistType')->willReturn('path');
         $pkg->method('getPrettyName')->willReturn('saucebase/test');
 
         $repo = $this->createMock(InstalledRepositoryInterface::class);
@@ -751,6 +793,7 @@ final class ModuleInstallerTest extends TestCase
         $repo->expects($this->never())->method('removePackage');
 
         $installer = new TestableInstaller($io, null);
+        $installer->forcePathRepository = true;
         $installer->uninstall($repo, $pkg);
     }
 
