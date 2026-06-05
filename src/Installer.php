@@ -292,6 +292,7 @@ class Installer extends LibraryInstaller
         }
 
         $path = $this->getInstallPath($package);
+
         // Genuine path repos: OS symlink (symlink:true) OR a git-tracked dev clone (.git present).
         // Packagist-installed modules have .git removed by DEFAULT_EXCLUDED_DIRS — they are neither.
         return is_link($path) || is_dir($path.'/.git');
