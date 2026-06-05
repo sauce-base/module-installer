@@ -281,10 +281,20 @@ class Installer extends LibraryInstaller
      * Returns true when the package is served by a local path repository.
      * Path repos have source == install path, so the normal download/delete cycle would
      * wipe the user's files before trying to copy from the now-missing source.
+     *
+     * With symlink:true, a genuine path repo creates a real OS symlink. A module installed
+     * from Packagist into the same directory is a real directory — not a true path repo.
      */
     protected function isPathRepository(PackageInterface $package): bool
     {
-        return $package->getDistType() === 'path';
+        if ($package->getDistType() !== 'path') {
+            return false;
+        }
+
+        $path = $this->getInstallPath($package);
+        // Genuine path repos: OS symlink (symlink:true) OR a git-tracked dev clone (.git present).
+        // Packagist-installed modules have .git removed by DEFAULT_EXCLUDED_DIRS — they are neither.
+        return is_link($path) || is_dir($path.'/.git');
     }
 
     /**
