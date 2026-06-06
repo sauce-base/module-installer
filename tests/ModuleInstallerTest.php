@@ -675,6 +675,40 @@ final class ModuleInstallerTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // install() locally-tracked guard (distType='zip', physical .git check)
+    // -------------------------------------------------------------------------
+
+    public function test_install_skips_when_install_path_is_locally_tracked(): void
+    {
+        $baseDir = sys_get_temp_dir().'/install-tracked-'.uniqid('', true);
+        mkdir($baseDir.'/test-module/.git', 0755, true);
+
+        $io = $this->createMock(IOInterface::class);
+        $io->expects($this->once())
+            ->method('write')
+            ->with($this->stringContains('Skipping install for locally tracked'));
+
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-dir' => $baseDir]);
+        $composer->method('getPackage')->willReturn($root);
+
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('zip');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+        $repo->expects($this->once())->method('addPackage');
+
+        $installer = new TestableInstaller($io, $composer);
+        $promise = $installer->install($repo, $pkg);
+
+        $this->assertNotNull($promise);
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    // -------------------------------------------------------------------------
     // update() path-repository guard
     // -------------------------------------------------------------------------
 
@@ -795,6 +829,42 @@ final class ModuleInstallerTest extends TestCase
         $installer = new TestableInstaller($io, null);
         $installer->forcePathRepository = true;
         $installer->uninstall($repo, $pkg);
+    }
+
+    // -------------------------------------------------------------------------
+    // update() locally-tracked guard (distType='zip', physical .git check)
+    // -------------------------------------------------------------------------
+
+    public function test_update_skips_when_install_path_is_locally_tracked(): void
+    {
+        $baseDir = sys_get_temp_dir().'/update-tracked-'.uniqid('', true);
+        mkdir($baseDir.'/test-module/.git', 0755, true);
+
+        $io = $this->createMock(IOInterface::class);
+        $io->expects($this->once())
+            ->method('write')
+            ->with($this->stringContains('Skipping update for locally tracked'));
+
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-dir' => $baseDir]);
+        $composer->method('getPackage')->willReturn($root);
+
+        $initial = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $target = new Package('saucebase/test-module', '2.0.0.0', '2.0.0');
+        $target->setDistType('zip');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturnOnConsecutiveCalls(true, false);
+        $repo->expects($this->once())->method('removePackage');
+        $repo->expects($this->once())->method('addPackage');
+
+        $installer = new TestableInstaller($io, $composer);
+        $promise = $installer->update($repo, $initial, $target);
+
+        $this->assertNotNull($promise);
+
+        (new Filesystem)->remove($baseDir);
     }
 
     // -------------------------------------------------------------------------

@@ -452,6 +452,16 @@ class Installer extends LibraryInstaller
             return \React\Promise\resolve(null);
         }
 
+        if ($this->isLocallyTracked($this->getInstallPath($package))) {
+            $this->io->write("  - <info>Skipping install for locally tracked module:</info> {$package->getPrettyName()}");
+
+            if (! $repo->hasPackage($package)) {
+                $repo->addPackage(clone $package);
+            }
+
+            return \React\Promise\resolve(null);
+        }
+
         $promise = $this->parentInstall($repo, $package);
 
         return $promise->then(function () use ($package) {
@@ -540,6 +550,20 @@ class Installer extends LibraryInstaller
         }
 
         $installPath = $this->getInstallPath($target);
+
+        if ($this->isLocallyTracked($installPath)) {
+            $this->io->write("  - <info>Skipping update for locally tracked module:</info> {$target->getPrettyName()}");
+
+            if ($repo->hasPackage($initial)) {
+                $repo->removePackage($initial);
+            }
+
+            if (! $repo->hasPackage($target)) {
+                $repo->addPackage(clone $target);
+            }
+
+            return \React\Promise\resolve(null);
+        }
         $stashPath = null;
         $basePath = null;
 
