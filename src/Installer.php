@@ -567,7 +567,7 @@ class Installer extends LibraryInstaller
         $stashPath = null;
         $basePath = null;
 
-        if ($this->getUpdateStrategy() === self::UPDATE_STRATEGY_MERGE) {
+        if ($this->getUpdateStrategy() === self::UPDATE_STRATEGY_MERGE && $initial->getDistType() !== 'path') {
             $stashPath = $this->stashModuleDir($this->getInstallPath($initial));
             if ($stashPath !== null) {
                 $basePath = sys_get_temp_dir().'/module-base-'.uniqid('', true);
@@ -575,6 +575,8 @@ class Installer extends LibraryInstaller
         } else {
             // Overwrite: stash for rollback safety rather than deleting outright.
             // $basePath stays null, which signals overwrite mode in the callbacks.
+            // Also covers initial=path: there's no remote dist to download as merge base,
+            // and stashing first would make the path inaccessible to PathDownloader.
             $stashPath = $this->stashModuleDir($installPath);
         }
 
