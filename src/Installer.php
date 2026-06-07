@@ -609,6 +609,20 @@ class Installer extends LibraryInstaller
                         (new Filesystem)->removeDirectory($stashPath);
                     }
 
+                    // When upgrading FROM a path package, parent::update() invokes
+                    // PathDownloader against the old path source which may not exist.
+                    // Track the repo manually — we have already placed the files.
+                    if ($initial->getDistType() === 'path') {
+                        if ($repo->hasPackage($initial)) {
+                            $repo->removePackage($initial);
+                        }
+                        if (! $repo->hasPackage($target)) {
+                            $repo->addPackage(clone $target);
+                        }
+
+                        return \React\Promise\resolve(null);
+                    }
+
                     // Delegate repo tracking (installed.json) to parent — skip the download step
                     // since we have already placed the files ourselves.
                     return $this->delegateRepoTracking($repo, $initial, $target);

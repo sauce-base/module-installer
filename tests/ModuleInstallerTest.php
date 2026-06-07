@@ -137,6 +137,30 @@ final class TestableInstaller extends Installer
     {
         return \React\Promise\resolve(null);
     }
+
+    public bool $downloadBaseInvoked = false;
+
+    protected function downloadBase(PackageInterface $initial, string $basePath): PromiseInterface
+    {
+        $this->downloadBaseInvoked = true;
+        mkdir($basePath, 0755, true);
+
+        return \React\Promise\resolve(null);
+    }
+
+    protected function downloadFresh(PackageInterface $package, string $path): PromiseInterface
+    {
+        return \React\Promise\resolve(null);
+    }
+
+    public bool $delegateRepoTrackingInvoked = false;
+
+    protected function delegateRepoTracking(InstalledRepositoryInterface $repo, PackageInterface $initial, PackageInterface $target): PromiseInterface
+    {
+        $this->delegateRepoTrackingInvoked = true;
+
+        return \React\Promise\resolve(null);
+    }
 }
 
 final class ModuleInstallerTest extends TestCase
@@ -863,6 +887,67 @@ final class ModuleInstallerTest extends TestCase
         $promise = $installer->update($repo, $initial, $target);
 
         $this->assertNotNull($promise);
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    // -------------------------------------------------------------------------
+    // update() merge-strategy guard for path-type initial packages
+    // -------------------------------------------------------------------------
+
+    public function test_update_skips_base_download_and_delegates_repo_manually_when_initial_is_path_type(): void
+    {
+        $baseDir = sys_get_temp_dir().'/update-path-initial-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
+
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-dir' => $baseDir]);
+        $composer->method('getPackage')->willReturn($root);
+
+        $initial = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $initial->setDistType('path');
+
+        $target = new Package('saucebase/test-module', '2.0.0.0', '2.0.0');
+        $target->setDistType('zip');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturnCallback(fn ($p) => $p === $initial);
+        $repo->expects($this->once())->method('removePackage')->with($initial);
+        $repo->expects($this->once())->method('addPackage');
+
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), $composer);
+        $installer->update($repo, $initial, $target);
+
+        $this->assertFalse($installer->downloadBaseInvoked);
+        $this->assertFalse($installer->delegateRepoTrackingInvoked);
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    public function test_update_downloads_base_and_delegates_repo_to_parent_when_initial_is_not_path_type(): void
+    {
+        $baseDir = sys_get_temp_dir().'/update-zip-initial-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
+
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-dir' => $baseDir]);
+        $composer->method('getPackage')->willReturn($root);
+
+        $initial = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $initial->setDistType('zip');
+
+        $target = new Package('saucebase/test-module', '2.0.0.0', '2.0.0');
+        $target->setDistType('zip');
+
+        $repo = $this->createStub(InstalledRepositoryInterface::class);
+
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), $composer);
+        $installer->update($repo, $initial, $target);
+
+        $this->assertTrue($installer->downloadBaseInvoked);
+        $this->assertTrue($installer->delegateRepoTrackingInvoked);
 
         (new Filesystem)->remove($baseDir);
     }
