@@ -311,7 +311,7 @@ class Installer extends LibraryInstaller
     protected function isInstalledModuleResolvedAsPath(PackageInterface $package): bool
     {
         return $package->getDistType() === 'path'
-            && !$this->isLocallyTracked($this->getInstallPath($package));
+            && ! $this->isLocallyTracked($this->getInstallPath($package));
     }
 
     /**
