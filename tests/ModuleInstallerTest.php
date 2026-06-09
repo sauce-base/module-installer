@@ -29,6 +29,14 @@ final class TestableInstaller extends Installer
     {
         $this->io = $io;
         $this->composer = $composer;
+        // Provide a no-op binaryInstaller since we bypass LibraryInstaller's constructor.
+        $this->binaryInstaller = new class extends \Composer\Installer\BinaryInstaller {
+            public function __construct() {}
+
+            public function removeBinaries(\Composer\Package\PackageInterface $package): void {}
+
+            public function installBinaries(\Composer\Package\PackageInterface $package, string $installPath, bool $warnOnOverwrite = true): void {}
+        };
     }
 
     public function callGetModuleName(PackageInterface $package): string
@@ -66,23 +74,14 @@ final class TestableInstaller extends Installer
         return parent::isPathRepository($package);
     }
 
-    public function callUpdateCode(PackageInterface $initial, PackageInterface $target): PromiseInterface
+    public function callIsInstalledModuleResolvedAsPath(PackageInterface $package): bool
     {
-        return $this->updateCode($initial, $target);
+        return parent::isInstalledModuleResolvedAsPath($package);
     }
 
-    public function setSkipUpdateCode(bool $value): void
+    public function callResolveRegistrationTarget(PackageInterface $initial, PackageInterface $target): PackageInterface
     {
-        $this->skipUpdateCode = $value;
-    }
-
-    public bool $parentUpdateCodeInvoked = false;
-
-    protected function invokeParentUpdateCode(PackageInterface $initial, PackageInterface $target): PromiseInterface
-    {
-        $this->parentUpdateCodeInvoked = true;
-
-        return parent::invokeParentUpdateCode($initial, $target);
+        return parent::resolveRegistrationTarget($initial, $target);
     }
 
     // ---- Framework-aware file copying ----
@@ -133,8 +132,12 @@ final class TestableInstaller extends Installer
         parent::copyFrameworkFiles($package);
     }
 
+    public bool $parentInstallInvoked = false;
+
     protected function parentInstall(InstalledRepositoryInterface $repo, PackageInterface $package): PromiseInterface
     {
+        $this->parentInstallInvoked = true;
+
         return \React\Promise\resolve(null);
     }
 
@@ -150,15 +153,6 @@ final class TestableInstaller extends Installer
 
     protected function downloadFresh(PackageInterface $package, string $path): PromiseInterface
     {
-        return \React\Promise\resolve(null);
-    }
-
-    public bool $delegateRepoTrackingInvoked = false;
-
-    protected function delegateRepoTracking(InstalledRepositoryInterface $repo, PackageInterface $initial, PackageInterface $target): PromiseInterface
-    {
-        $this->delegateRepoTrackingInvoked = true;
-
         return \React\Promise\resolve(null);
     }
 }
@@ -920,12 +914,11 @@ final class ModuleInstallerTest extends TestCase
         $installer->update($repo, $initial, $target);
 
         $this->assertFalse($installer->downloadBaseInvoked);
-        $this->assertFalse($installer->delegateRepoTrackingInvoked);
 
         (new Filesystem)->remove($baseDir);
     }
 
-    public function test_update_downloads_base_and_delegates_repo_to_parent_when_initial_is_not_path_type(): void
+    public function test_update_downloads_base_and_does_direct_repo_tracking_when_initial_is_not_path_type(): void
     {
         $baseDir = sys_get_temp_dir().'/update-zip-initial-'.uniqid('', true);
         mkdir($baseDir.'/test-module', 0755, true);
@@ -941,37 +934,310 @@ final class ModuleInstallerTest extends TestCase
         $target = new Package('saucebase/test-module', '2.0.0.0', '2.0.0');
         $target->setDistType('zip');
 
-        $repo = $this->createStub(InstalledRepositoryInterface::class);
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturnCallback(fn ($p) => $p === $initial);
+        $repo->expects($this->once())->method('removePackage')->with($initial);
+        $repo->expects($this->once())->method('addPackage');
 
         $installer = new TestableInstaller($this->createStub(IOInterface::class), $composer);
         $installer->update($repo, $initial, $target);
 
         $this->assertTrue($installer->downloadBaseInvoked);
-        $this->assertTrue($installer->delegateRepoTrackingInvoked);
 
         (new Filesystem)->remove($baseDir);
     }
 
     // -------------------------------------------------------------------------
-    // updateCode() skip flag
+    // isInstalledModuleResolvedAsPath
     // -------------------------------------------------------------------------
 
-    public function test_update_code_returns_resolved_promise_when_skip_flag_is_set(): void
+    public function test_is_installed_module_resolved_as_path_returns_true_for_real_dir_with_path_dist(): void
     {
-        $io = $this->createStub(IOInterface::class);
-        $installer = new TestableInstaller($io, null);
-        $installer->setSkipUpdateCode(true);
+        $baseDir = sys_get_temp_dir().'/is-installed-real-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
 
-        $initial = $this->createStub(PackageInterface::class);
-        $target = $this->createStub(PackageInterface::class);
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('path');
+
+        $this->assertTrue($installer->callIsInstalledModuleResolvedAsPath($pkg));
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    public function test_is_installed_module_resolved_as_path_returns_false_for_symlink(): void
+    {
+        $baseDir = sys_get_temp_dir().'/is-installed-symlink-'.uniqid('', true);
+        $target = sys_get_temp_dir().'/is-installed-symlink-src-'.uniqid('', true);
+        mkdir($target, 0755, true);
+        mkdir($baseDir, 0755, true);
+        symlink($target, $baseDir.'/test-module');
+
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('path');
+
+        $this->assertFalse($installer->callIsInstalledModuleResolvedAsPath($pkg));
+
+        (new Filesystem)->remove($baseDir);
+        (new Filesystem)->remove($target);
+    }
+
+    public function test_is_installed_module_resolved_as_path_returns_false_for_git_dir(): void
+    {
+        $baseDir = sys_get_temp_dir().'/is-installed-git-'.uniqid('', true);
+        mkdir($baseDir.'/test-module/.git', 0755, true);
+
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('path');
+
+        $this->assertFalse($installer->callIsInstalledModuleResolvedAsPath($pkg));
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    public function test_is_installed_module_resolved_as_path_returns_false_for_non_path_dist(): void
+    {
+        $baseDir = sys_get_temp_dir().'/is-installed-zip-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
+
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('zip');
+
+        $this->assertFalse($installer->callIsInstalledModuleResolvedAsPath($pkg));
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    // -------------------------------------------------------------------------
+    // resolveRegistrationTarget
+    // -------------------------------------------------------------------------
+
+    public function test_resolve_registration_target_copies_non_path_dist_from_initial(): void
+    {
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+
+        $initial = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $initial->setDistType('zip');
+        $initial->setDistUrl('https://api.github.com/repos/saucebase-dev/blog/zipball/abc123');
+        $initial->setDistReference('abc123');
+
+        $target = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $target->setDistType('path');
+        $target->setDistUrl('modules/test-module');
+
+        $result = $installer->callResolveRegistrationTarget($initial, $target);
+
+        $this->assertSame('zip', $result->getDistType());
+        $this->assertSame($initial->getDistUrl(), $result->getDistUrl());
+        $this->assertSame($initial->getDistReference(), $result->getDistReference());
+        $this->assertNotSame($target, $result, 'should return a clone, not mutate the original');
+    }
+
+    public function test_resolve_registration_target_returns_target_unchanged_when_initial_is_also_path(): void
+    {
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+
+        $initial = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $initial->setDistType('path');
+
+        $target = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $target->setDistType('path');
+        $target->setDistUrl('modules/test-module');
+
+        $result = $installer->callResolveRegistrationTarget($initial, $target);
+
+        $this->assertSame($target, $result);
+        $this->assertSame('path', $result->getDistType());
+    }
+
+    // -------------------------------------------------------------------------
+    // update() — isInstalledModuleResolvedAsPath guard
+    // -------------------------------------------------------------------------
+
+    public function test_update_does_not_crash_when_target_is_installed_module_resolved_as_path(): void
+    {
+        $baseDir = sys_get_temp_dir().'/update-path-crash-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
+
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-dir' => $baseDir]);
+        $composer->method('getPackage')->willReturn($root);
+
+        $initial = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $initial->setDistType('zip');
+
+        $target = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $target->setDistType('path');
+        $target->setDistUrl($baseDir.'/test-module');
+
+        $repo = $this->createStub(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), $composer);
 
         $resolved = false;
-        $installer->callUpdateCode($initial, $target)->then(function () use (&$resolved) {
+        $installer->update($repo, $initial, $target)->then(function () use (&$resolved) {
             $resolved = true;
         });
 
-        $this->assertTrue($resolved, 'updateCode should resolve immediately when skip flag is set');
-        $this->assertFalse($installer->parentUpdateCodeInvoked, 'parent::updateCode() must not be called when skip flag is set');
+        $this->assertTrue($resolved);
+        $this->assertFalse($installer->downloadBaseInvoked, 'should not attempt to download base');
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    public function test_update_does_not_stash_module_dir_when_target_is_installed_module_resolved_as_path(): void
+    {
+        $baseDir = sys_get_temp_dir().'/update-path-nostash-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
+        file_put_contents($baseDir.'/test-module/file.php', '<?php // user edit');
+
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-dir' => $baseDir]);
+        $composer->method('getPackage')->willReturn($root);
+
+        $initial = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $initial->setDistType('zip');
+
+        $target = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $target->setDistType('path');
+
+        $repo = $this->createStub(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), $composer);
+        $installer->update($repo, $initial, $target);
+
+        $this->assertDirectoryExists($baseDir.'/test-module', 'module dir must not be stashed or removed');
+        $this->assertFileExists($baseDir.'/test-module/file.php', 'user files must survive');
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    public function test_update_preserves_dist_info_from_initial_when_target_is_installed_module_resolved_as_path(): void
+    {
+        $baseDir = sys_get_temp_dir().'/update-path-distfix-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
+
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-dir' => $baseDir]);
+        $composer->method('getPackage')->willReturn($root);
+
+        $initial = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $initial->setDistType('zip');
+        $initial->setDistUrl('https://api.github.com/repos/saucebase-dev/test/zipball/abc');
+        $initial->setDistReference('abc');
+
+        $target = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $target->setDistType('path');
+        $target->setDistUrl($baseDir.'/test-module');
+
+        $registered = null;
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+        $repo->expects($this->once())->method('addPackage')->willReturnCallback(
+            function (PackageInterface $p) use (&$registered) { $registered = $p; }
+        );
+
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), $composer);
+        $installer->update($repo, $initial, $target);
+
+        $this->assertNotNull($registered);
+        $this->assertSame('zip', $registered->getDistType(), 'lock must record zip dist, not path');
+        $this->assertSame($initial->getDistUrl(), $registered->getDistUrl());
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    public function test_update_keeps_path_dist_when_initial_is_also_path_type(): void
+    {
+        $baseDir = sys_get_temp_dir().'/update-path-both-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
+
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-dir' => $baseDir]);
+        $composer->method('getPackage')->willReturn($root);
+
+        $initial = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $initial->setDistType('path');
+
+        $target = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $target->setDistType('path');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+        $repo->expects($this->once())->method('addPackage');
+
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), $composer);
+
+        $resolved = false;
+        $installer->update($repo, $initial, $target)->then(function () use (&$resolved) {
+            $resolved = true;
+        });
+
+        $this->assertTrue($resolved, 'must not throw when both initial and target are path type');
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    // -------------------------------------------------------------------------
+    // install() — installed-module-as-path guard
+    // -------------------------------------------------------------------------
+
+    public function test_install_skips_download_when_module_dir_exists_with_path_dist(): void
+    {
+        $baseDir = sys_get_temp_dir().'/install-path-exists-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
+
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('path');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+        $repo->expects($this->once())->method('addPackage');
+
+        $resolved = false;
+        $installer->install($repo, $pkg)->then(function () use (&$resolved) {
+            $resolved = true;
+        });
+
+        $this->assertTrue($resolved);
+        $this->assertFalse($installer->parentInstallInvoked, 'parentInstall must not be called when dir already exists');
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    public function test_install_falls_through_to_parent_when_module_dir_absent_with_path_dist(): void
+    {
+        $baseDir = sys_get_temp_dir().'/install-path-absent-'.uniqid('', true);
+        mkdir($baseDir, 0755, true); // base exists but test-module subdir does NOT
+
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('path');
+
+        $repo = $this->createStub(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+
+        $installer->install($repo, $pkg);
+
+        $this->assertTrue($installer->parentInstallInvoked, 'parentInstall must be called when dir is absent');
+
+        (new Filesystem)->remove($baseDir);
     }
 
     // -------------------------------------------------------------------------

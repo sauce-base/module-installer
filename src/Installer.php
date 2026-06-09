@@ -30,8 +30,6 @@ class Installer extends LibraryInstaller
 
     const KNOWN_FRAMEWORKS = ['vue', 'react', 'svelte'];
 
-    protected bool $skipUpdateCode = false;
-
     const UPDATE_STRATEGY_MERGE = 'merge';
 
     const UPDATE_STRATEGY_OVERWRITE = 'overwrite';
@@ -305,6 +303,42 @@ class Installer extends LibraryInstaller
     }
 
     /**
+     * Returns true when a package has dist.type=path but its install path is NOT locally
+     * tracked (no symlink, no .git). This identifies a Packagist-installed module that was
+     * re-resolved by the modules/* path repository on a subsequent composer update.
+     * The files are already in place; no download should occur.
+     */
+    protected function isInstalledModuleResolvedAsPath(PackageInterface $package): bool
+    {
+        return $package->getDistType() === 'path'
+            && !$this->isLocallyTracked($this->getInstallPath($package));
+    }
+
+    /**
+     * Returns the package to register in installed.json after a path-skip scenario.
+     * When initial has non-path dist info (Packagist zip/tar), returns a clone of target
+     * with initial's dist metadata copied over so the lock file retains the Packagist
+     * source rather than recording dist.type=path.
+     * When initial is also path (already-polluted lock), returns target unchanged.
+     */
+    protected function resolveRegistrationTarget(
+        PackageInterface $initial,
+        PackageInterface $target
+    ): PackageInterface {
+        if ($initial->getDistType() !== null && $initial->getDistType() !== 'path') {
+            $clone = clone $target;
+            $clone->setDistType($initial->getDistType());
+            $clone->setDistUrl($initial->getDistUrl());
+            $clone->setDistReference($initial->getDistReference());
+            $clone->setDistSha1Checksum($initial->getDistSha1Checksum());
+
+            return $clone;
+        }
+
+        return $target;
+    }
+
+    /**
      * Returns the path to frontend.json. Extracted for testability.
      */
     protected function getFrontendJsonPath(): string
@@ -427,7 +461,6 @@ class Installer extends LibraryInstaller
 
     /**
      * Proxy for parent::install() — extracted for testability.
-     * Mirrors the invokeParentUpdateCode() pattern.
      */
     protected function parentInstall(InstalledRepositoryInterface $repo, PackageInterface $package): PromiseInterface
     {
@@ -462,53 +495,29 @@ class Installer extends LibraryInstaller
             return \React\Promise\resolve(null);
         }
 
+        // Module is already installed (re-resolved by modules/* path repo on a repeat run).
+        // Files are in place — just register and skip the download.
+        // Note: if dist.type=path but the dir is absent (fresh clone from a polluted lock),
+        // this guard does not fire and parentInstall will fail. Fix the lock with composer update.
+        if ($package->getDistType() === 'path'
+            && ! $this->isLocallyTracked($this->getInstallPath($package))
+            && is_dir($this->getInstallPath($package))
+        ) {
+            $this->io->write("  - <info>Skipping install (module already present, resolved as path by modules/* repo):</info> {$package->getPrettyName()}");
+
+            if (! $repo->hasPackage($package)) {
+                $repo->addPackage(clone $package);
+            }
+
+            return \React\Promise\resolve(null);
+        }
+
         $promise = $this->parentInstall($repo, $package);
 
         return $promise->then(function () use ($package) {
             $this->removeExcludedDirectories($package);
             $this->copyFrameworkFiles($package);
         });
-    }
-
-    /**
-     * Call parent::update() solely for its installed.json tracking side-effects.
-     * Sets the skip flag so updateCode() is a no-op, then resets it regardless of outcome.
-     */
-    protected function delegateRepoTracking(InstalledRepositoryInterface $repo, PackageInterface $initial, PackageInterface $target): PromiseInterface
-    {
-        $this->skipUpdateCode = true;
-
-        $resetFlag = function (): void {
-            $this->skipUpdateCode = false;
-        };
-
-        return parent::update($repo, $initial, $target)->then(
-            $resetFlag,
-            function (\Throwable $e) use ($resetFlag): never {
-                $resetFlag();
-                throw $e;
-            }
-        );
-    }
-
-    /**
-     * No-op hook for parent::update() — skipped when we have already handled the download ourselves.
-     * Overriding this lets parent::update() run only for its repo-tracking side-effects.
-     *
-     * {@inheritDoc}
-     */
-    protected function updateCode(PackageInterface $initial, PackageInterface $target): PromiseInterface
-    {
-        if ($this->skipUpdateCode) {
-            return \React\Promise\resolve(null);
-        }
-
-        return $this->invokeParentUpdateCode($initial, $target);
-    }
-
-    protected function invokeParentUpdateCode(PackageInterface $initial, PackageInterface $target): PromiseInterface
-    {
-        return parent::updateCode($initial, $target);
     }
 
     /**
@@ -564,6 +573,26 @@ class Installer extends LibraryInstaller
 
             return \React\Promise\resolve(null);
         }
+
+        // Target was re-resolved by modules/* path repo (not a dev repo).
+        // Files are already in place at the same version — skip download, update tracking only.
+        // Copies initial's dist info onto the registered clone so the lock records zip/tar
+        // rather than dist.type=path, preventing future composer install failures on fresh clones.
+        if ($this->isInstalledModuleResolvedAsPath($target)) {
+            $this->io->write("  - <info>Skipping download (module resolved as path by modules/* repo):</info> {$target->getPrettyName()}");
+            $registrationTarget = $this->resolveRegistrationTarget($initial, $target);
+            $this->binaryInstaller->removeBinaries($initial);
+            $this->binaryInstaller->installBinaries($registrationTarget, $installPath);
+            if ($repo->hasPackage($initial)) {
+                $repo->removePackage($initial);
+            }
+            if (! $repo->hasPackage($registrationTarget)) {
+                $repo->addPackage(clone $registrationTarget);
+            }
+
+            return \React\Promise\resolve(null);
+        }
+
         $stashPath = null;
         $basePath = null;
 
@@ -609,23 +638,17 @@ class Installer extends LibraryInstaller
                         (new Filesystem)->removeDirectory($stashPath);
                     }
 
-                    // When upgrading FROM a path package, parent::update() invokes
-                    // PathDownloader against the old path source which may not exist.
-                    // Track the repo manually — we have already placed the files.
-                    if ($initial->getDistType() === 'path') {
-                        if ($repo->hasPackage($initial)) {
-                            $repo->removePackage($initial);
-                        }
-                        if (! $repo->hasPackage($target)) {
-                            $repo->addPackage(clone $target);
-                        }
-
-                        return \React\Promise\resolve(null);
+                    // Direct repo tracking — equivalent to parent::update() minus the download.
+                    $this->binaryInstaller->removeBinaries($initial);
+                    $this->binaryInstaller->installBinaries($target, $installPath);
+                    if ($repo->hasPackage($initial)) {
+                        $repo->removePackage($initial);
+                    }
+                    if (! $repo->hasPackage($target)) {
+                        $repo->addPackage(clone $target);
                     }
 
-                    // Delegate repo tracking (installed.json) to parent — skip the download step
-                    // since we have already placed the files ourselves.
-                    return $this->delegateRepoTracking($repo, $initial, $target);
+                    return \React\Promise\resolve(null);
                 },
                 function (\Throwable $e) use ($stashPath, $basePath, $initial) {
                     if ($stashPath !== null) {
