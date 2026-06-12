@@ -269,9 +269,85 @@ class Installer extends LibraryInstaller
             // exit code >0 = conflict markers inserted, but result is still usable
             if ($process->getExitCode() > 0) {
                 $this->io->writeError("  <warning>Merge conflict in $rel — conflict markers inserted</warning>");
+                // $newFile is still the clean upstream copy here — rename happens at line below.
+                $this->stageConflictInIndex($stashFile, $baseFile, $newFile, $install, $rel);
             }
 
             (new SymfonyFilesystem)->rename($merged, $newFile, true);
+        }
+    }
+
+    /**
+     * Register the three pre-merge file versions in git's index at stages 1/2/3 so the
+     * working-tree file (with conflict markers) appears as a real conflict in `git status`,
+     * VSCode's Source Control panel, and the merge editor.
+     *
+     * Fails silently — if git is unavailable or $installPath is outside a repo, the conflict
+     * markers remain in the file but the index is left unchanged.
+     */
+    protected function stageConflictInIndex(
+        string $ours,
+        string $base,
+        string $theirs,
+        string $installPath,
+        string $relativePathname
+    ): void {
+        try {
+            $gitRootProc = new Process(['git', '-C', $installPath, 'rev-parse', '--show-toplevel']);
+            $gitRootProc->run();
+            if (! $gitRootProc->isSuccessful()) {
+                return;
+            }
+            $root = rtrim($gitRootProc->getOutput(), "\r\n");
+
+            $absFile = $installPath.DIRECTORY_SEPARATOR.$relativePathname;
+            $absFile = str_replace('\\', '/', realpath($absFile) ?: $absFile);
+            $rootNorm = rtrim(str_replace('\\', '/', $root), '/');
+            if (strpos($absFile, $rootNorm.'/') !== 0) {
+                return;
+            }
+            $relFromRoot = substr($absFile, strlen($rootNorm) + 1);
+
+            $hashBase   = new Process(['git', '-C', $root, 'hash-object', '-w', $base]);
+            $hashOurs   = new Process(['git', '-C', $root, 'hash-object', '-w', $ours]);
+            $hashTheirs = new Process(['git', '-C', $root, 'hash-object', '-w', $theirs]);
+            $hashBase->run();
+            $hashOurs->run();
+            $hashTheirs->run();
+
+            if (! $hashBase->isSuccessful() || ! $hashOurs->isSuccessful() || ! $hashTheirs->isSuccessful()) {
+                return;
+            }
+
+            $shaBase   = trim($hashBase->getOutput());
+            $shaOurs   = trim($hashOurs->getOutput());
+            $shaTheirs = trim($hashTheirs->getOutput());
+
+            foreach ([$shaBase, $shaOurs, $shaTheirs] as $sha) {
+                if (! preg_match('/^[0-9a-f]{40}$/', $sha)) {
+                    return;
+                }
+            }
+
+            // --force-remove is required because the working-tree file already exists
+            // (written by downloadFresh); plain --remove is a no-op when the file is present.
+            $remove = new Process(['git', '-C', $root, 'update-index', '--force-remove', $relFromRoot]);
+            $remove->run();
+            if (! $remove->isSuccessful()) {
+                return;
+            }
+
+            $indexInfo = implode("\n", [
+                "100644 {$shaBase} 1\t{$relFromRoot}",
+                "100644 {$shaOurs} 2\t{$relFromRoot}",
+                "100644 {$shaTheirs} 3\t{$relFromRoot}",
+            ])."\n";
+
+            $updateIndex = new Process(['git', '-C', $root, 'update-index', '--index-info']);
+            $updateIndex->setInput($indexInfo);
+            $updateIndex->run();
+        } catch (\Throwable $e) {
+            // Degrade gracefully — conflict markers remain in the file.
         }
     }
 
