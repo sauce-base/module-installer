@@ -17,6 +17,7 @@ use React\Promise\PromiseInterface;
 use Saucebase\ModuleInstaller\Exceptions\ModuleInstallerException;
 use Saucebase\ModuleInstaller\Installer;
 use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\Process\Process;
 
 /**
  * Shim that avoids LibraryInstaller's heavy constructor.
@@ -64,6 +65,16 @@ final class TestableInstaller extends Installer
     public function callMergeStash(string $stash, string $base, string $install): void
     {
         parent::mergeStash($stash, $base, $install);
+    }
+
+    public function callStageConflictInIndex(
+        string $ours,
+        string $base,
+        string $theirs,
+        string $installPath,
+        string $relativePathname
+    ): void {
+        parent::stageConflictInIndex($ours, $base, $theirs, $installPath, $relativePathname);
     }
 
     public function callRestoreStash(string $stashPath, PackageInterface $package): void
@@ -455,6 +466,51 @@ final class ModuleInstallerTest extends TestCase
         $fs->remove($stash);
         $fs->remove($base);
         $fs->remove($install);
+    }
+
+    public function test_stage_conflict_in_index_registers_git_conflict_stages(): void
+    {
+        $repo = sys_get_temp_dir().'/conflict-index-test-'.uniqid('', true);
+        mkdir($repo.'/modules/auth', 0755, true);
+
+        (new Process(['git', 'init'], $repo))->mustRun();
+        (new Process(['git', 'config', 'user.email', 'test@test.com'], $repo))->mustRun();
+        (new Process(['git', 'config', 'user.name', 'Test'], $repo))->mustRun();
+
+        // Commit an initial file so the index has a known baseline
+        file_put_contents($repo.'/modules/auth/api.php', "original\n");
+        (new Process(['git', 'add', '.'], $repo))->mustRun();
+        (new Process(['git', 'commit', '-m', 'init'], $repo))->mustRun();
+
+        // Simulate the three versions available at conflict time
+        $oursFile = sys_get_temp_dir().'/ours-'.uniqid('', true).'.php';
+        $baseFile = sys_get_temp_dir().'/base-'.uniqid('', true).'.php';
+        file_put_contents($oursFile, "user-change\n");
+        file_put_contents($baseFile, "original\n");
+        // The install-path file holds upstream content (not yet overwritten by merge result)
+        file_put_contents($repo.'/modules/auth/api.php', "upstream-change\n");
+
+        $installer = new TestableInstaller($this->createStub(IOInterface::class), null);
+        $installer->callStageConflictInIndex(
+            $oursFile,
+            $baseFile,
+            $repo.'/modules/auth/api.php',
+            $repo.'/modules/auth',
+            'api.php'
+        );
+
+        $lsFiles = new Process(['git', 'ls-files', '--stage', 'modules/auth/api.php'], $repo);
+        $lsFiles->run();
+        $output = $lsFiles->getOutput();
+
+        // ls-files --stage format: "<mode> <sha> <stage>\t<path>"
+        $this->assertStringContainsString(" 1\t", $output, 'Stage 1 (base) should be registered');
+        $this->assertStringContainsString(" 2\t", $output, 'Stage 2 (ours) should be registered');
+        $this->assertStringContainsString(" 3\t", $output, 'Stage 3 (theirs) should be registered');
+
+        unlink($oursFile);
+        unlink($baseFile);
+        (new Filesystem)->remove($repo);
     }
 
     public function test_merge_stash_keeps_user_added_files(): void
