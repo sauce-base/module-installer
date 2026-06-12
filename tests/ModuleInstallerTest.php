@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests;
 
 use Composer\Composer;
+use Composer\Installer\BinaryInstaller;
 use Composer\IO\IOInterface;
 use Composer\Package\Package;
 use Composer\Package\PackageInterface;
@@ -31,12 +32,13 @@ final class TestableInstaller extends Installer
         $this->io = $io;
         $this->composer = $composer;
         // Provide a no-op binaryInstaller since we bypass LibraryInstaller's constructor.
-        $this->binaryInstaller = new class extends \Composer\Installer\BinaryInstaller {
+        $this->binaryInstaller = new class extends BinaryInstaller
+        {
             public function __construct() {}
 
-            public function removeBinaries(\Composer\Package\PackageInterface $package): void {}
+            public function removeBinaries(PackageInterface $package): void {}
 
-            public function installBinaries(\Composer\Package\PackageInterface $package, string $installPath, bool $warnOnOverwrite = true): void {}
+            public function installBinaries(PackageInterface $package, string $installPath, bool $warnOnOverwrite = true): void {}
         };
     }
 
@@ -1202,7 +1204,9 @@ final class ModuleInstallerTest extends TestCase
         $repo = $this->createMock(InstalledRepositoryInterface::class);
         $repo->method('hasPackage')->willReturn(false);
         $repo->expects($this->once())->method('addPackage')->willReturnCallback(
-            function (PackageInterface $p) use (&$registered) { $registered = $p; }
+            function (PackageInterface $p) use (&$registered) {
+                $registered = $p;
+            }
         );
 
         $installer = new TestableInstaller($this->createStub(IOInterface::class), $composer);
