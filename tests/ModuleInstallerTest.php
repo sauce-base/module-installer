@@ -137,6 +137,11 @@ final class TestableInstaller extends Installer
         return parent::isPathRepository($package);
     }
 
+    public function callShouldDeleteOnRemove(): bool
+    {
+        return parent::shouldDeleteOnRemove();
+    }
+
     public bool $copyFrameworkFilesInvoked = false;
 
     protected function copyFrameworkFiles(PackageInterface $package): void
@@ -1559,6 +1564,74 @@ final class ModuleInstallerTest extends TestCase
         $composer->method('getPackage')->willReturn($root);
 
         return new TestableInstaller($io, $composer);
+    }
+
+    // -------------------------------------------------------------------------
+    // uninstall() skip-deletion-by-default guard (module-delete-on-remove)
+    // -------------------------------------------------------------------------
+
+    public function test_uninstall_skips_folder_deletion_by_default_and_removes_from_repo(): void
+    {
+        $io = $this->createMock(IOInterface::class);
+        $io->expects($this->once())
+            ->method('write')
+            ->with($this->stringContains('Skipping deletion of module directory'));
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getPrettyName')->willReturn('saucebase/test-module');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(true);
+        $repo->expects($this->once())->method('removePackage')->with($pkg);
+
+        $installer = new TestableInstaller($io, null);
+        $installer->forcePathRepository = false;
+        $installer->uninstall($repo, $pkg);
+    }
+
+    public function test_should_delete_on_remove_returns_false_when_flag_absent(): void
+    {
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $composer->method('getPackage')->willReturn($root);
+
+        $installer = new TestableInstaller(null, $composer);
+        $this->assertFalse($installer->callShouldDeleteOnRemove());
+    }
+
+    public function test_should_delete_on_remove_returns_true_when_flag_enabled(): void
+    {
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-delete-on-remove' => true]);
+        $composer->method('getPackage')->willReturn($root);
+
+        $installer = new TestableInstaller(null, $composer);
+        $this->assertTrue($installer->callShouldDeleteOnRemove());
+    }
+
+    public function test_uninstall_path_repository_guard_takes_precedence_over_delete_flag(): void
+    {
+        $io = $this->createMock(IOInterface::class);
+        $io->expects($this->once())
+            ->method('write')
+            ->with($this->stringContains('Skipping uninstall for path repository'));
+
+        $pkg = $this->createStub(PackageInterface::class);
+        $pkg->method('getPrettyName')->willReturn('saucebase/test-module');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(true);
+        $repo->expects($this->once())->method('removePackage')->with($pkg);
+
+        $composer = $this->createStub(Composer::class);
+        $root = new RootPackage('root/app', '1.0.0.0', '1.0.0');
+        $root->setExtra(['module-delete-on-remove' => true]);
+        $composer->method('getPackage')->willReturn($root);
+
+        $installer = new TestableInstaller($io, $composer);
+        $installer->forcePathRepository = true;
+        $installer->uninstall($repo, $pkg);
     }
 
     public function test_flatten_framework_files_removes_stale_root_file_from_other_framework(): void

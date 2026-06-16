@@ -739,8 +739,25 @@ class Installer extends LibraryInstaller
     }
 
     /**
+     * Whether to physically delete the module directory on uninstall.
+     * Defaults to false (skip deletion) to prevent accidental data loss.
+     * Enable via extra['module-delete-on-remove'] = true in root composer.json.
+     */
+    protected function shouldDeleteOnRemove(): bool
+    {
+        if (! $this->composer || ! $this->composer->getPackage()) {
+            return false;
+        }
+
+        $extra = $this->composer->getPackage()->getExtra();
+
+        return (bool) ($extra['module-delete-on-remove'] ?? false);
+    }
+
+    /**
      * Override uninstall to protect path repository files from deletion.
      * A `composer remove` on a path repo must never wipe the working source directory.
+     * By default, all module directories are preserved — set module-delete-on-remove: true to enable deletion.
      *
      * {@inheritDoc}
      */
@@ -748,6 +765,17 @@ class Installer extends LibraryInstaller
     {
         if ($this->isPathRepository($package)) {
             $this->io->write("  - <info>Skipping uninstall for path repository:</info> {$package->getPrettyName()}");
+
+            if ($repo->hasPackage($package)) {
+                $repo->removePackage($package);
+            }
+
+            return \React\Promise\resolve(null);
+        }
+
+        if (! $this->shouldDeleteOnRemove()) {
+            $installPath = $this->getInstallPath($package);
+            $this->io->write("  - <info>Skipping deletion of module directory (set module-delete-on-remove: true to enable):</info> {$installPath}");
 
             if ($repo->hasPackage($package)) {
                 $repo->removePackage($package);
