@@ -308,8 +308,8 @@ class Installer extends LibraryInstaller
             }
             $relFromRoot = substr($absFile, strlen($rootNorm) + 1);
 
-            $hashBase   = new Process(['git', '-C', $root, 'hash-object', '-w', $base]);
-            $hashOurs   = new Process(['git', '-C', $root, 'hash-object', '-w', $ours]);
+            $hashBase = new Process(['git', '-C', $root, 'hash-object', '-w', $base]);
+            $hashOurs = new Process(['git', '-C', $root, 'hash-object', '-w', $ours]);
             $hashTheirs = new Process(['git', '-C', $root, 'hash-object', '-w', $theirs]);
             $hashBase->run();
             $hashOurs->run();
@@ -319,8 +319,8 @@ class Installer extends LibraryInstaller
                 return;
             }
 
-            $shaBase   = trim($hashBase->getOutput());
-            $shaOurs   = trim($hashOurs->getOutput());
+            $shaBase = trim($hashBase->getOutput());
+            $shaOurs = trim($hashOurs->getOutput());
             $shaTheirs = trim($hashTheirs->getOutput());
 
             foreach ([$shaBase, $shaOurs, $shaTheirs] as $sha) {
