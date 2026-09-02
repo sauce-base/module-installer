@@ -379,6 +379,15 @@ class Installer extends LibraryInstaller
     }
 
     /**
+     * Returns true when the install path already holds module files. An existing but empty
+     * directory does not count — that is a leftover, not an installed module.
+     */
+    protected function hasModuleFiles(string $path): bool
+    {
+        return is_dir($path) && (new \FilesystemIterator($path))->valid();
+    }
+
+    /**
      * Returns true when a package has dist.type=path but its install path is NOT locally
      * tracked (no symlink, no .git). This identifies a Packagist-installed module that was
      * re-resolved by the modules/* path repository on a subsequent composer update.
@@ -479,6 +488,36 @@ class Installer extends LibraryInstaller
         }
 
         $this->flattenFrameworkFiles($jsRoot, $framework);
+        $this->rewriteCrossModuleImports($jsRoot);
+    }
+
+    /**
+     * Strips any framework subdirectory segment from cross-module import paths in JS/TS/Vue files.
+     * After flattening, imports like @modules/billing/resources/js/vue/Foo.vue become
+     *
+     * @modules/billing/resources/js/Foo.vue regardless of which framework is active.
+     */
+    protected function rewriteCrossModuleImports(string $jsRoot): void
+    {
+        $extensions = ['vue', 'ts', 'tsx', 'js'];
+        $fwPattern = implode('|', array_map('preg_quote', self::KNOWN_FRAMEWORKS));
+
+        foreach ((new Finder)->files()->in($jsRoot) as $file) {
+            if (! in_array($file->getExtension(), $extensions, true)) {
+                continue;
+            }
+
+            $content = file_get_contents($file->getPathname());
+            $rewritten = preg_replace(
+                "#(@modules/[^/]+/resources/js/)({$fwPattern})/#",
+                '$1',
+                $content
+            );
+
+            if ($rewritten !== $content) {
+                file_put_contents($file->getPathname(), $rewritten);
+            }
+        }
     }
 
     /**
@@ -571,15 +610,13 @@ class Installer extends LibraryInstaller
             return \React\Promise\resolve(null);
         }
 
-        // Module is already installed (re-resolved by modules/* path repo on a repeat run).
-        // Files are in place — just register and skip the download.
-        // Note: if dist.type=path but the dir is absent (fresh clone from a polluted lock),
-        // this guard does not fire and parentInstall will fail. Fix the lock with composer update.
-        if ($package->getDistType() === 'path'
-            && ! $this->isLocallyTracked($this->getInstallPath($package))
-            && is_dir($this->getInstallPath($package))
-        ) {
-            $this->io->write("  - <info>Skipping install (module already present, resolved as path by modules/* repo):</info> {$package->getPrettyName()}");
+        // Module files are already on disk — copy-and-own means the working tree wins.
+        // Covers a repeat run re-resolved by the modules/* path repo, and a production deploy
+        // where modules/ is committed to the app repo but vendor/ is empty, so Composer treats
+        // every module as a fresh install and the download would clobber the user's edits.
+        // Version bumps still land: those are update() operations, which merge.
+        if ($this->hasModuleFiles($this->getInstallPath($package))) {
+            $this->io->write("  - <info>Skipping install (module files already present):</info> {$package->getPrettyName()}");
 
             if (! $repo->hasPackage($package)) {
                 $repo->addPackage(clone $package);
