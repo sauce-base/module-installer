@@ -1264,6 +1264,7 @@ final class ModuleInstallerTest extends TestCase
     {
         $baseDir = sys_get_temp_dir().'/install-path-exists-'.uniqid('', true);
         mkdir($baseDir.'/test-module', 0755, true);
+        file_put_contents($baseDir.'/test-module/composer.json', '{}');
 
         $installer = $this->makeInstallerWithModuleDir($baseDir);
 
@@ -1301,6 +1302,55 @@ final class ModuleInstallerTest extends TestCase
         $installer->install($repo, $pkg);
 
         $this->assertTrue($installer->parentInstallInvoked, 'parentInstall must be called when dir is absent');
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    public function test_install_does_not_overwrite_existing_module_dir_from_dist(): void
+    {
+        // Production deploy: app repo carries modules/ in git, vendor/ is empty, so composer
+        // treats every module as a fresh install. Without a guard the dist download would
+        // restore files the user deleted locally and clobber their edits.
+        $baseDir = sys_get_temp_dir().'/install-dist-exists-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
+        file_put_contents($baseDir.'/test-module/composer.json', '{}');
+
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('zip');
+
+        $repo = $this->createMock(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+        $repo->expects($this->once())->method('addPackage');
+
+        $resolved = false;
+        $installer->install($repo, $pkg)->then(function () use (&$resolved) {
+            $resolved = true;
+        });
+
+        $this->assertTrue($resolved);
+        $this->assertFalse($installer->parentInstallInvoked, 'parentInstall must not run over an existing module dir');
+
+        (new Filesystem)->remove($baseDir);
+    }
+
+    public function test_install_downloads_when_existing_module_dir_is_empty(): void
+    {
+        $baseDir = sys_get_temp_dir().'/install-dist-empty-'.uniqid('', true);
+        mkdir($baseDir.'/test-module', 0755, true);
+
+        $installer = $this->makeInstallerWithModuleDir($baseDir);
+
+        $pkg = new Package('saucebase/test-module', '1.0.0.0', '1.0.0');
+        $pkg->setDistType('zip');
+
+        $repo = $this->createStub(InstalledRepositoryInterface::class);
+        $repo->method('hasPackage')->willReturn(false);
+
+        $installer->install($repo, $pkg);
+
+        $this->assertTrue($installer->parentInstallInvoked, 'an empty leftover dir must not block the download');
 
         (new Filesystem)->remove($baseDir);
     }

@@ -26,7 +26,7 @@ The Saucebase app (`saucebase/composer.json`) uses `module-type: saucebase-modul
 
 ## Core Behaviours
 
-**Install** (`install()`): Downloads the package, removes excluded directories, and deploys frontend framework files if `frontend.json` is present. Skips entirely for path-repository packages.
+**Install** (`install()`): Downloads the package, removes excluded directories, and deploys frontend framework files if `frontend.json` is present. Skips entirely for path-repository packages, locally tracked dirs, and any install path that already contains files (copy-and-own: a committed `modules/` dir must survive `composer install` on a fresh deploy).
 
 **Update** (`update()`): Two strategies:
 - `merge` (default) — stashes the user's copy, downloads the new version, downloads the original version as a base, runs a 3-way `git merge-file`. Conflicts are staged in the git index (stages 1/2/3) so they appear in `git status`.
