@@ -494,6 +494,7 @@ class Installer extends LibraryInstaller
     /**
      * Strips any framework subdirectory segment from cross-module import paths in JS/TS/Vue files.
      * After flattening, imports like @modules/billing/resources/js/vue/Foo.vue become
+     *
      * @modules/billing/resources/js/Foo.vue regardless of which framework is active.
      */
     protected function rewriteCrossModuleImports(string $jsRoot): void
